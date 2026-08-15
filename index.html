@@ -1065,12 +1065,12 @@
             };
         }
 
-        // ---------- 多源获取 ----------
+        // ---------- 多源获取（仅真实） ----------
         async function fetchRealData() {
             const key = API_KEY;
             const sources = [];
 
-            // 1. 直连
+            // 1. 直连（可能因CORS失败）
             sources.push({
                 id: 'direct',
                 name: '直连(yu28.top)',
@@ -1079,7 +1079,7 @@
                 paths: { kj: '/api/kj.json?nbr=100', sz: '/api/sz.json?nbr=50', sha: '/api/sha.json?nbr=50' }
             });
 
-            // 2. 同源代理（如果页面部署在服务器上）
+            // 2. 同源代理（需服务器支持）
             if (location.protocol === 'https:' || location.protocol === 'http:') {
                 sources.push({
                     id: 'proxy',
@@ -1090,7 +1090,7 @@
                 });
             }
 
-            // 3. 云端隧道
+            // 3. 云端隧道（第三方代理）
             sources.push({
                 id: 'rproxy',
                 name: '云端隧道',
@@ -1099,11 +1099,11 @@
                 paths: { kj: '/proxy/kj.json?nbr=100', sz: '/proxy/sz.json?nbr=50', sha: '/proxy/sha.json?nbr=50' }
             });
 
-            // 4. CORS代理（将Key放在URL中，注意安全）
+            // 4. CORS代理（allorigins）
             const corsProxy = 'https://api.allorigins.win/raw?url=';
             sources.push({
                 id: 'cors',
-                name: 'CORS代理',
+                name: 'CORS代理(allorigins)',
                 base: corsProxy,
                 headers: {},
                 paths: {
@@ -1152,10 +1152,9 @@
             if (isFetching) return;
             isFetching = true;
             try {
-                // 仅尝试真实数据，不生成模拟
+                // 仅真实数据，无模拟
                 const result = await fetchRealData();
 
-                // 成功获取
                 const hist = result.kj.map(normKj).filter(h => !isNaN(h.sum) && h.nbr);
                 if (!hist.length) throw new Error('解析后无有效数据');
 
@@ -1195,21 +1194,19 @@
 
             } catch (e) {
                 console.error('真实数据加载失败:', e);
-                // 清除旧数据，避免展示过期信息（可选，保持旧数据也可）
-                // 我们保留旧数据，但更新状态为错误
+                // 清除旧数据中的“模拟”标记，但保留已有真实数据（如果有）
                 document.getElementById('subLine').textContent = '⚠️ 真实数据加载失败：' + e.message;
                 document.getElementById('srcDot').className = 'src-dot offline';
                 document.getElementById('srcLabel').textContent = '❌ 真实数据加载失败，请检查网络或API Key';
-                // 不生成模拟数据，不修改HIST
-                // 如果之前有数据，可保留显示，但标记为过期
-                if (HIST.length) {
-                    document.getElementById('subLine').textContent = '⚠️ 数据已过期，最新加载失败：' + e.message;
-                } else {
-                    // 无任何数据，所有显示保持--
+                if (!HIST.length) {
+                    // 无任何数据，清空展示
                     document.getElementById('liveInfo').textContent = '数据不可用';
                     document.getElementById('sigQj').textContent = '--';
                     document.getElementById('sigXg').textContent = '--';
                     document.getElementById('planBox').innerHTML = '<div style="color:var(--dim);font-size:13px">无数据</div>';
+                } else {
+                    // 保留旧数据，但标记为过期
+                    document.getElementById('subLine').textContent = '⚠️ 数据已过期（最新加载失败），请手动刷新';
                 }
             } finally {
                 isFetching = false;
@@ -1564,7 +1561,7 @@
             const out = [];
             out.push('协议：' + location.protocol);
             out.push('API Key: ' + (API_KEY ? '已设置' : '未设置'));
-            out.push('数据源模式: 真实数据');
+            out.push('数据源模式: 真实数据（无模拟）');
             out.push('最新期: ' + (HIST.length ? HIST[0].nbr : '无'));
             document.getElementById('srcLabel').textContent = '🔍 ' + out.join(' ｜ ');
             document.getElementById('subLine').textContent = '🔍 诊断完成';
