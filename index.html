@@ -1068,21 +1068,38 @@
         // ---------- 通过CORS代理获取真实数据 ----------
         async function fetchRealData() {
             const key = API_KEY;
+            // 云端隧道代理（本地 file:// 打开时使用，响应带 CORS 头 *）
+            const REMOTE_PROXY = 'https://815d76cc83fe6a.lhr.life';
             // 定义代理列表（按可用性排序）
             const proxyList = [
                 {
+                    name: '云端隧道',
+                    url: (path) => `${REMOTE_PROXY}/proxy` + path.replace('/api/', '/'),
+                    headers: {}
+                },
+                {
+                    name: '同源代理',
+                    url: (path) => (/^https?:$/.test(location.protocol) ? location.origin + '/proxy' + path.replace('/api/', '/') : null),
+                    headers: {}
+                },
+                {
+                    name: 'yu28直连',
+                    url: (path) => `https://yu28.top${path}`,
+                    headers: { 'X-Api-Key': key }
+                },
+                {
                     name: 'allorigins',
                     url: (path) =>
-                        `https://api.allorigins.win/raw?url=${encodeURIComponent('https://yu28.top' + path + '&api_key=' + key)}`
+                        `https://api.allorigins.win/raw?url=${encodeURIComponent('https://yu28.top' + path)}`
                 },
                 {
                     name: 'corsproxy.io',
                     url: (path) =>
-                        `https://corsproxy.io/?${encodeURIComponent('https://yu28.top' + path + '&api_key=' + key)}`
+                        `https://corsproxy.io/?${encodeURIComponent('https://yu28.top' + path)}`
                 },
                 {
                     name: 'proxy.cors.sh',
-                    url: (path) => `https://proxy.cors.sh/yu28.top${path}?api_key=${key}`,
+                    url: (path) => `https://proxy.cors.sh/yu28.top${path}`,
                     headers: { 'x-cors-api-key': 'temp_123' } // 可选，某些代理需要
                 }
             ];
@@ -1094,6 +1111,7 @@
                     const kjUrl = proxy.url('/api/kj.json?nbr=100');
                     const szUrl = proxy.url('/api/sz.json?nbr=50');
                     const shaUrl = proxy.url('/api/sha.json?nbr=50');
+                    if (!kjUrl || !szUrl || !shaUrl) throw new Error('当前环境不适用');
 
                     const headers = proxy.headers || {};
 
