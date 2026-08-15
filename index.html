@@ -1066,7 +1066,7 @@
         async function fetchRealData() {
             const key = API_KEY;
             // 移植自星轨优化版实测策略：yu28 直连（带 X-Api-Key，响应 vary: Origin 动态CORS）
-            // 在 GitHub Pages https 环境下可直接 fetch 成功；公共 CORS 代理与云端隧道仅作兜底。
+            // 在 GitHub Pages https 环境下可直接 fetch 成功；公共 CORS 代理仅作兜底。
             const fetchOne = (url, headers, timeout = 6000) =>
                 Promise.race([
                     fetch(url, { headers, signal: AbortSignal.timeout(timeout) }),
@@ -1086,14 +1086,11 @@
                 if (!kjData || !kjData.length) throw new Error('空数据');
                 return { kj: kjData, sz: szRes.data || szRes.list || [], sha: shaRes.data || shaRes.list || [], source: name, raw: kjRes };
             };
-            // 数据源列表：直连第一，代理兜底（与星轨优化版 CONFIG.API_URLS 同序）
+            // 数据源列表：完全对齐星轨_优化版_v3 CONFIG.API_URLS（直连→allorigins→proxy.cors.sh）
             const sources = [
                 ['yu28直连', (p) => 'https://yu28.top' + p, { 'X-Api-Key': key }],
                 ['allorigins', (p) => 'https://api.allorigins.win/raw?url=' + encodeURIComponent('https://yu28.top' + p), {}],
                 ['proxy.cors.sh', (p) => 'https://proxy.cors.sh/yu28.top' + p, { 'x-cors-api-key': 'temp_123' }],
-                ['corsproxy.io', (p) => 'https://corsproxy.io/?' + encodeURIComponent('https://yu28.top' + p), {}],
-                ['云端隧道1', (p) => 'https://55e96dca468bfb.lhr.life/proxy' + p.replace('/api/', '/'), {}],
-                ['云端隧道2', (p) => 'https://815d76cc83fe6a.lhr.life/proxy' + p.replace('/api/', '/'), {}],
             ];
             // 1) 直连优先：成功即返回（星轨版实测唯一稳定源）
             try { return await trySource(sources[0][0], sources[0][1], sources[0][2]); }
