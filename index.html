@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>千金星轨 · 智能资金系统 v7（星轨倒计时·诊断修复）</title>
+    <title>千金星轨 · 智能资金系统 v7（完整修复版）</title>
     <style>
         :root {
             --bg0: #0b0e1a;
@@ -84,7 +84,7 @@
         }
         .field {
             flex: 1;
-            min-width: 90px
+            min-width: 80px
         }
         .field label {
             display: block;
@@ -521,11 +521,18 @@
         .data-source .src-dot.mock {
             background: #ff7b4a
         }
+        .data-source .src-dot.offline {
+            background: var(--red)
+        }
+        .api-key-input {
+            flex: 2;
+            min-width: 150px
+        }
     </style>
 </head>
 <body>
     <div class="hd">
-        <h1>千金星轨 · 智能资金系统 v7<span class="ver-badge">星轨倒计时·诊断修复 0815</span></h1>
+        <h1>千金星轨 · 智能资金系统 v7<span class="ver-badge">完整修复版</span></h1>
         <p id="subLine">实时数据加载中…</p>
         <div class="data-source" id="srcStatus"><span class="src-dot" id="srcDot"></span><span id="srcLabel">数据源：待加载</span></div>
     </div>
@@ -564,14 +571,15 @@
             </div>
         </div>
         <div class="row" style="margin-top:10px">
+            <div class="field api-key-input"><label>API Key（yu28平台）</label><input id="iApiKey" type="text" value="yu28_f9f41d673b447fac" placeholder="请输入您的 Key"></div>
             <div class="field"><label>自动刷新（秒）</label><input id="iInterval" type="number" value="20" min="10" max="120"></div>
             <div class="field"><label>止损线（%）</label><input id="iStopLoss" type="number" value="20" min="1" max="60"></div>
             <div class="field"><label>止盈线（%）</label><input id="iStopWin" type="number" value="30" min="1" max="100"></div>
+        </div>
+        <div class="row" style="margin-top:10px">
             <div class="field"><label>每日自动重置</label>
                 <select id="iDayReset"><option value="1">开（每天从本金重新计）</option><option value="0">关</option></select>
             </div>
-        </div>
-        <div class="row" style="margin-top:10px">
             <div class="field"><label>每期基础注额</label><input id="iBase" type="number" value="20" min="1"></div>
             <div class="field"><label>倍投倍数</label><input id="iMult" type="number" value="1.8" step="0.1"></div>
             <div class="field"><label>特码开关</label>
@@ -675,236 +683,8 @@
 
     <script>
         // ============================================================
-        // 双引擎算法库（千金U v4 + 星轨 v3 原版逻辑）
+        // 双引擎算法库（千金U v4 + 星轨 v3）
         // ============================================================
-        const API = 'https://yu28.top';
-        const KEY = 'yu28_f9f41d673b447fac';
-
-        // ============================================================
-        // 数据源引擎（内置 yu28 直连 + 同源代理 + 字段映射 + 自动降级 + 模拟数据fallback）
-        // ============================================================
-        const BUILTIN_SRC = [{
-            id: 'yu28',
-            name: 'yu28.top（新接口·已验证）',
-            base: 'https://yu28.top',
-            headers: { 'X-Api-Key': 'yu28_f9f41d673b447fac' },
-            paths: { kj: '/api/kj.json?nbr=100', sha: '/api/sha.json?nbr=50', sz: '/api/sz.json?nbr=50' },
-            fmt: 'string'
-        }];
-
-        function getProxySrc() {
-            if (!/^https?:$/.test(location.protocol)) return null;
-            return {
-                id: 'proxy',
-                name: '同源代理(本机服务)',
-                base: location.origin,
-                headers: {},
-                paths: { kj: '/proxy/kj.json?nbr=100', sha: '/proxy/sha.json?nbr=50', sz: '/proxy/sz.json?nbr=50' },
-                fmt: 'string'
-            };
-        }
-        const REMOTE_PROXY = {
-            id: 'rproxy',
-            name: '云端代理(隧道)',
-            base: 'https://2ff770c2bf653a.lhr.life',
-            headers: {},
-            paths: { kj: '/proxy/kj.json?nbr=100', sha: '/proxy/sha.json?nbr=50', sz: '/proxy/sz.json?nbr=50' },
-            fmt: 'string'
-        };
-
-        function getAllSrcs() {
-            const arr = [];
-            const ps = getProxySrc();
-            if (ps) arr.push(ps);
-            arr.push(REMOTE_PROXY);
-            return arr.concat(BUILTIN_SRC);
-        }
-
-        // ---------- 模拟数据生成器（当所有API都失败时使用） ----------
-        function generateMockData(count) {
-            const combos = ['大单', '大双', '小单', '小双'];
-            const data = [];
-            const now = new Date();
-            // 用固定种子使数据可复现，但每次刷新略有变化
-            let seed = 20260815;
-            function seededRandom() {
-                seed = (seed * 9301 + 49297) % 233280;
-                return seed / 233280;
-            }
-            // 生成从最近开始往前推的数据（最新的在索引0）
-            for (let i = 0; i < count; i++) {
-                const r = seededRandom();
-                const combo = combos[Math.floor(r * 4) % 4];
-                let sum;
-                // 根据组合生成合理的和值，使分布接近真实
-                if (combo === '大单') sum = 15 + Math.floor(seededRandom() * 13);
-                else if (combo === '大双') sum = 14 + Math.floor(seededRandom() * 13);
-                else if (combo === '小单') sum = 1 + Math.floor(seededRandom() * 13);
-                else sum = 2 + Math.floor(seededRandom() * 12);
-                sum = Math.max(0, Math.min(27, Math.round(sum)));
-                // 期号：从20260815001开始，倒序
-                const nbr = String(20260815001 + (count - 1 - i));
-                const date = new Date(now);
-                date.setMinutes(date.getMinutes() - i * 10 - Math.floor(seededRandom() * 3));
-                data.push({
-                    nbr: nbr,
-                    number: '和值=' + sum,
-                    num: sum,
-                    combination: combo,
-                    time: date.toISOString().replace('T', ' ').slice(0, 19)
-                });
-            }
-            return data;
-        }
-
-        // ---------- 字段归一化 ----------
-        function normKj(h, fmt) {
-            fmt = fmt || 'string';
-            let sum = NaN,
-                number = h.number;
-            if (fmt === 'string') {
-                if (h.num !== undefined && h.num !== null) {
-                    sum = Number(h.num);
-                    if (!number) number = sum + '点';
-                } else {
-                    const s = String(h.number || '');
-                    const m = s.match(/[=：:]\s*(\d+)/);
-                    if (m) sum = Number(m[1]);
-                    else sum = Number(s.replace(/[^0-9]/g, ''));
-                }
-            } else if (h.num !== undefined && h.num !== null) {
-                sum = Number(h.num);
-                if (!number) number = sum + '点';
-            } else if (h.number !== undefined) {
-                const m = String(h.number).match(/=(\d+)/);
-                sum = m ? Number(m[1]) : Number(h.number);
-                if (isNaN(sum)) sum = Number(h.number);
-            }
-            if (isNaN(sum)) sum = 14;
-            const combo = h.combination || comboOf(sum);
-            return {
-                nbr: String(h.nbr !== undefined ? h.nbr : (h.issue || h.period || h.qs || '')),
-                time: h.time || h.timestamp || h.datetime,
-                sum: sum,
-                number: number,
-                combo: combo
-            };
-        }
-
-        function aiPredict(obj) {
-            if (!obj) return null;
-            for (const k of ['predict', 'result', 'prediction', 'value', 'code']) {
-                if (obj[k] !== undefined && obj[k] !== null) return obj[k];
-            }
-            return null;
-        }
-
-        function parseCountdown(obj) {
-            if (!obj) return null;
-            for (const k of ['countdown', 'count_down', 'nextCountdown', 'leftTime', 'remain', 'nextTime']) {
-                const v = obj[k];
-                if (v === undefined || v === null) continue;
-                const s = String(v);
-                if (s.includes(':')) {
-                    const p = s.split(':').map(Number);
-                    if (p.every(x => !isNaN(x))) return p.reduce((a, b) => a * 60 + b, 0);
-                }
-                const n = Number(s);
-                if (!isNaN(n) && n > 0 && n < 86400) return n;
-            }
-            return null;
-        }
-
-        let CD_TARGET = 0;
-        let CD_SRC = '';
-        let cdTimer = null;
-        let cdTriggered = false;
-
-        function updateCountdownFrom(raw, first) {
-            const cdSec = parseCountdown(raw);
-            CD_SRC = cdSec !== null ? '接口倒计时' : '时间推算';
-            if (cdSec !== null && cdSec > 0) {
-                CD_TARGET = Date.now() + cdSec * 1000;
-            } else if (first && first.time) {
-                const t = new Date(String(first.time).replace(' ', 'T'));
-                if (!isNaN(t.getTime())) CD_TARGET = t.getTime() + 120000;
-            } else CD_TARGET = 0;
-            startCountdown();
-        }
-
-        function startCountdown() {
-            if (cdTimer) clearInterval(cdTimer);
-            cdTriggered = false;
-            cdTimer = setInterval(() => {
-                const cd = document.getElementById('nextCountdown');
-                if (!cd) return;
-                if (!CD_TARGET) { cd.textContent = '--:--';
-                    cd.classList.remove('urgent'); return; }
-                const diff = CD_TARGET - Date.now();
-                if (diff <= 0) {
-                    cd.textContent = '更新数据...';
-                    cd.classList.add('urgent');
-                    if (!cdTriggered) {
-                        cdTriggered = true;
-                        clearInterval(cdTimer);
-                        cdTimer = null;
-                        setTimeout(() => loadData(false), 1500);
-                    }
-                    return;
-                }
-                const m = Math.floor(diff / 60000);
-                const s = Math.floor((diff % 60000) / 1000);
-                cd.textContent = m + '分' + String(s).padStart(2, '0') + '秒';
-                cd.classList.toggle('urgent', m < 1);
-            }, 500);
-        }
-
-        async function fetchJson(base, path, headers, timeout) {
-            if (!path) return { data: [] };
-            const ctrl = new AbortController();
-            const t = setTimeout(() => ctrl.abort(), timeout || 8000);
-            try {
-                const r = await fetch(base + path, { headers: headers || {}, signal: ctrl.signal, cache: 'no-store' });
-                if (!r.ok) throw new Error('HTTP ' + r.status);
-                return r.json();
-            } catch (e) {
-                if (e && e.name === 'AbortError') { const err = new Error('超时(>' + ((timeout || 8000) / 1000) +
-                    's)');
-                    err.kind = 'timeout'; throw err; }
-                const err = new Error((e && e.message) || '网络错误');
-                err.kind = (e && /Failed to fetch|NetworkError|load failed/i.test(e.message || '')) ? 'network-cors' :
-                    'other';
-                throw err;
-            } finally { clearTimeout(t); }
-        }
-
-        async function diagnose() {
-            const out = [];
-            out.push('协议：' + location.protocol + '（' + (/^file:/.test(location.protocol) ? '本地文件打开，跨域受限' :
-                'http(s) 托管') + '）');
-            out.push('版本：v7 · ' + new Date().toLocaleString('zh-CN', { hour12: false }));
-            let anyOk = false;
-            for (const s of getAllSrcs()) {
-                try {
-                    const j = await fetchJson(s.base, s.paths.kj, s.headers, 6000);
-                    const arr = j.data || j.list || j.rows || (Array.isArray(j) ? j : []);
-                    if (arr && arr.length) anyOk = true;
-                    out.push('✅ ' + (s.name || s.id) + '：OK（' + (arr.length || 0) + '条）');
-                } catch (e) {
-                    out.push('❌ ' + (s.name || s.id) + '：' + e.message + (e.kind === 'network-cors' ?
-                        '（浏览器跨域/CORS拦截）' : ''));
-                }
-            }
-            if (!anyOk) out.push('🔧 已启用模拟数据备用模式，系统可正常使用');
-            document.getElementById('srcLabel').textContent = '🔍 ' + out.slice(0, 4).join(' ｜ ');
-            document.getElementById('subLine').textContent = '🔍 诊断完成：' + (out[0] || '');
-            document.getElementById('srcStatus').style.display = 'flex';
-        }
-
-        let SRC = BUILTIN_SRC[0];
-        let srcUsedId = 'yu28';
-        let IS_MOCK = false;
-
         const ALL = ['大单', '大双', '小单', '小双'];
         const COMBO_MAP = { '小单': ['大单', '小双'], '小双': ['大双', '小单'], '大单': ['大双', '小单'], '大双': ['小双', '大单'] };
         const ODDS = {
@@ -913,6 +693,15 @@
                 21: 25, 7: 20, 20: 20, 8: 17, 19: 17, 9: 15, 18: 15, 10: 14, 17: 14, 11: 13, 16: 13, 12: 12, 15: 12,
                 13: 12, 14: 12 }
         };
+
+        function comboOf(n) { return (n >= 14 ? '大' : '小') + (n % 2 === 1 ? '单' : '双'); }
+
+        function count(arr) { const c = {}; for (const x of arr) c[x] = (c[x] || 0) + 1; return c; }
+
+        function mode1(c) { let b = null,
+                m = 0; for (const k in c)
+                if (c[k] > m) { m = c[k];
+                    b = k } return b; }
 
         const SUB = {
             freq: h => mode1(count(h.slice(-20).map(r => r.combo))),
@@ -939,13 +728,6 @@
                     .length >= 6 ? '双' : '单'; return big + odd; }
         };
 
-        function count(arr) { const c = {}; for (const x of arr) c[x] = (c[x] || 0) + 1; return c; }
-
-        function mode1(c) { let b = null,
-                m = 0; for (const k in c)
-                if (c[k] > m) { m = c[k];
-                    b = k } return b; }
-
         function selfVote(hist, win) {
             win = win || 15;
             const sc = {};
@@ -961,15 +743,9 @@
         function normalizeScores(obj) { const vals = Object.values(obj); const mx = Math.max(...vals, 1e-9); const out = {};
             for (const k in obj) out[k] = obj[k] / mx; return out; }
 
-        function recentWinRate(arr, n) { n = n || 20; const a = (arr || []).filter(x => x.hit !== undefined && x.hit !== null)
-                .slice(0, n); if (!a.length) return 0.5; return a.filter(x => x.hit).length / a.length; }
-
         function probabilityWeight(n) { let w = 0; for (let a = 0; a <= 9; a++)
                 for (let b = 0; b <= 9; b++) { const c = n - a - b; if (c >= 0 && c <= 9) w++; } return w; }
 
-        function comboOf(n) { return (n >= 14 ? '大' : '小') + (n % 2 === 1 ? '单' : '双'); }
-
-        // ---------- 千金U v4 融合决策 ----------
         function qjDecide(hist, aiSha, aiSz) {
             const scores = { '大单': 0, '大双': 0, '小单': 0, '小双': 0 };
             const recent = hist.slice(-10),
@@ -981,8 +757,8 @@
             let szCombos = null;
             if (aiSz && aiSz.length) {
                 const last = aiSz[0];
-                if (last && aiPredict(last)) {
-                    const parts = String(aiPredict(last)).split(',').map(s => s.trim()).filter(s => ALL.includes(s));
+                if (last && last.predict) {
+                    const parts = String(last.predict).split(',').map(s => s.trim()).filter(s => ALL.includes(s));
                     if (parts.length >= 2) szCombos = parts;
                     else if (parts.length === 1) szCombos = [parts[0], COMBO_MAP[parts[0]] ? COMBO_MAP[parts[0]][0] :
                         null
@@ -994,8 +770,8 @@
             let killFromSha = null;
             if (aiSha && aiSha.length) {
                 const last = aiSha[0];
-                if (last && aiPredict(last) && ALL.includes(aiPredict(last))) {
-                    killFromSha = aiPredict(last);
+                if (last && last.predict && ALL.includes(last.predict)) {
+                    killFromSha = last.predict;
                     const hot = recent5.filter(r => r.combo === killFromSha).length;
                     if (hot >= 2) scores[killFromSha] += 0.5;
                     else scores[killFromSha] -= 1.2;
@@ -1012,7 +788,6 @@
             return { killGroup, pickCombos, source, conf, scores };
         }
 
-        // ---------- 特码精选 ----------
         function pickTe(hist, pickCombos, cnt) {
             cnt = cnt || 5;
             const recent = hist.slice(-10);
@@ -1048,23 +823,22 @@
             return res;
         }
 
-        // ---------- 星轨 v3 决策 ----------
         function xgDecide(hist, aiSha, aiSz) {
             const v = normalizeScores(selfVote(hist));
             let kill = null,
                 src = '本地动态权重投票';
             if (aiSha && aiSha.length) {
                 const last = aiSha[0];
-                if (last && aiPredict(last) && ALL.includes(aiPredict(last))) {
-                    kill = aiPredict(last);
+                if (last && last.predict && ALL.includes(last.predict)) {
+                    kill = last.predict;
                     src = '平台杀组AI（67-73%命中）';
                     return { killGroup: kill, source: src, conf: 0.7 };
                 }
             }
             if (aiSz && aiSz.length) {
                 const last = aiSz[0];
-                if (last && aiPredict(last)) {
-                    const parts = String(aiPredict(last)).split(',').map(s => s.trim()).filter(s => ALL.includes(s));
+                if (last && last.predict) {
+                    const parts = String(last.predict).split(',').map(s => s.trim()).filter(s => ALL.includes(s));
                     if (parts.length === 2) {
                         const cnt = {};
                         for (const c of parts) cnt[c] = (cnt[c] || 0) + 1;
@@ -1087,10 +861,6 @@
             return { killGroup: kill, source: src, conf: 0.5 };
         }
 
-        function aiRate(arr) { const a = arr.filter(x => x.hit !== undefined && x.hit !== null); return a.length ? a.filter(
-                x => x.hit).length / a.length : 0; }
-
-        // ---------- 双引擎融合 ----------
         function fuseEngine(hist, aiSha, aiSz) {
             const qj = qjDecide(hist, aiSha, aiSz);
             const xg = xgDecide(hist, aiSha, aiSz);
@@ -1135,6 +905,8 @@
                 S.winStreak = 0;
                 S.flow = 0;
                 S.rebate = 0; }
+            const key = document.getElementById('iApiKey').value.trim();
+            if (key) API_KEY = key;
             renderBank();
             renderPlan();
             calcEV();
@@ -1257,36 +1029,27 @@
 
         function renderBank() {
             const pnl = S.bal - S.cap;
-            const pnlPct = pnl / S.cap * 100;
             document.getElementById('bCap').textContent = fmt(S.cap);
             document.getElementById('bBal').textContent = fmt(S.bal);
             const elPnl = document.getElementById('bPnL');
             elPnl.textContent = (pnl >= 0 ? '+' : '') + fmt(pnl);
             elPnl.style.color = pnl >= 0 ? 'var(--green)' : 'var(--red)';
             document.getElementById('bRebate').textContent = '¥' + fmt(S.rebate || 0);
-            const bar = document.getElementById('statusBar');
-            const lossPct = (S.cap - S.bal) / S.cap * 100,
-                winPct = pnlPct;
-            if (S.bal <= S.cap * (1 - S.stopLoss)) { bar.className = 'status stop';
-                bar.innerHTML = '⛔ 已触发止损线，建议停止本轮'; } else if (winPct >= S.stopWin * 100) { bar.className =
-                    'status ok';
-                bar.innerHTML = '🎯 已触发止盈线，可锁定利润'; } else if (S.winStreak >= 3) { bar.className = 'status ok';
-                bar.innerHTML = '🔥 已连中 ' + S.winStreak + ' 期，势头正猛！'; } else if (S.streak >= 3) { bar.className =
-                    'status warn';
-                bar.innerHTML = '⚠️ 已连亏 ' + S.streak + ' 期，注意控制节奏'; } else { bar.className = 'status ok';
-                bar.innerHTML = '● 系统运行中 · 连中 ' + S.winStreak + ' / 连亏 ' + S.streak; }
+            autoToast(false);
         }
 
         function fmt(n) { return Number(n).toLocaleString('zh-CN', { minimumFractionDigits: 1, maximumFractionDigits: 1 }); }
 
         // ============================================================
-        // 数据加载 + 实时轮询 + 自动判奖
+        // 数据加载 — 支持多源 + 模拟备用
         // ============================================================
         let HIST = [],
             AI = { sha: [], sz: [] };
         let LAST_PLAN = null;
         let BT = { stats: null, rows: [], mode: 30 };
         let timer = null;
+        let API_KEY = 'yu28_f9f41d673b447fac';
+        let IS_MOCK = false;
 
         function setupTimer() {
             if (timer) clearInterval(timer);
@@ -1296,116 +1059,210 @@
         let isFetching = false;
         let LAST_NBR = '';
 
+        // ---------- 模拟数据 ----------
+        function generateMockData(count) {
+            const combos = ['大单', '大双', '小单', '小双'];
+            const data = [];
+            let seed = 20260815;
+            const seededRandom = () => { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; };
+            const now = new Date();
+            for (let i = 0; i < count; i++) {
+                const r = seededRandom();
+                const combo = combos[Math.floor(r * 4) % 4];
+                let sum;
+                if (combo === '大单') sum = 15 + Math.floor(seededRandom() * 13);
+                else if (combo === '大双') sum = 14 + Math.floor(seededRandom() * 13);
+                else if (combo === '小单') sum = 1 + Math.floor(seededRandom() * 13);
+                else sum = 2 + Math.floor(seededRandom() * 12);
+                sum = Math.max(0, Math.min(27, Math.round(sum)));
+                const nbr = String(20260815001 + (count - 1 - i));
+                const date = new Date(now);
+                date.setMinutes(date.getMinutes() - i * 10 - Math.floor(seededRandom() * 3));
+                data.push({
+                    nbr: nbr,
+                    number: '和值=' + sum,
+                    num: sum,
+                    combination: combo,
+                    time: date.toISOString().replace('T', ' ').slice(0, 19)
+                });
+            }
+            return data;
+        }
+
+        // ---------- 归一化 ----------
+        function normKj(h) {
+            let sum = NaN,
+                number = h.number;
+            if (h.num !== undefined && h.num !== null) {
+                sum = Number(h.num);
+                if (!number) number = sum + '点';
+            } else if (h.number !== undefined) {
+                const m = String(h.number).match(/[=：:]\s*(\d+)/);
+                if (m) sum = Number(m[1]);
+                else sum = Number(h.number.replace(/[^0-9]/g, ''));
+            }
+            if (isNaN(sum)) sum = 14;
+            const combo = h.combination || comboOf(sum);
+            return {
+                nbr: String(h.nbr || h.issue || h.period || h.qs || ''),
+                time: h.time || h.timestamp || h.datetime,
+                sum,
+                number,
+                combo
+            };
+        }
+
+        // ---------- 多源获取 ----------
+        async function fetchRealData() {
+            const key = API_KEY;
+            const sources = [];
+
+            // 1. 直连
+            sources.push({
+                id: 'direct',
+                name: '直连(yu28.top)',
+                base: 'https://yu28.top',
+                headers: { 'X-Api-Key': key },
+                paths: { kj: '/api/kj.json?nbr=100', sz: '/api/sz.json?nbr=50', sha: '/api/sha.json?nbr=50' }
+            });
+
+            // 2. 同源代理
+            if (location.protocol === 'https:' || location.protocol === 'http:') {
+                sources.push({
+                    id: 'proxy',
+                    name: '同源代理',
+                    base: location.origin,
+                    headers: {},
+                    paths: { kj: '/proxy/kj.json?nbr=100', sz: '/proxy/sz.json?nbr=50', sha: '/proxy/sha.json?nbr=50' }
+                });
+            }
+
+            // 3. 云端隧道
+            sources.push({
+                id: 'rproxy',
+                name: '云端隧道',
+                base: 'https://2ff770c2bf653a.lhr.life',
+                headers: {},
+                paths: { kj: '/proxy/kj.json?nbr=100', sz: '/proxy/sz.json?nbr=50', sha: '/proxy/sha.json?nbr=50' }
+            });
+
+            // 4. CORS代理
+            const corsProxy = 'https://api.allorigins.win/raw?url=';
+            sources.push({
+                id: 'cors',
+                name: 'CORS代理',
+                base: corsProxy,
+                headers: {},
+                paths: {
+                    kj: encodeURIComponent('https://yu28.top/api/kj.json?nbr=100&api_key=' + key),
+                    sz: encodeURIComponent('https://yu28.top/api/sz.json?nbr=50&api_key=' + key),
+                    sha: encodeURIComponent('https://yu28.top/api/sha.json?nbr=50&api_key=' + key)
+                },
+                isProxy: true
+            });
+
+            let lastError = null;
+            for (const src of sources) {
+                try {
+                    const fetchOpt = (path) => {
+                        const url = src.base + (src.isProxy ? '' : '') + path;
+                        return fetch(url, {
+                            headers: src.headers || {},
+                            signal: AbortSignal.timeout(8000),
+                            cache: 'no-store'
+                        });
+                    };
+                    const [kjRes, szRes, shaRes] = await Promise.all([
+                        fetchOpt(src.paths.kj).then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status))),
+                        fetchOpt(src.paths.sz).then(r => r.ok ? r.json() : { data: [] }).catch(() => ({ data: [] })),
+                        fetchOpt(src.paths.sha).then(r => r.ok ? r.json() : { data: [] }).catch(() => ({ data: [] }))
+                    ]);
+                    const kjData = kjRes.data || kjRes.list || kjRes.rows || (Array.isArray(kjRes) ? kjRes : []);
+                    if (!kjData || !kjData.length) throw new Error('空数据');
+                    return {
+                        kj: kjData,
+                        sz: szRes.data || szRes.list || [],
+                        sha: shaRes.data || shaRes.list || [],
+                        source: src.name,
+                        raw: kjRes
+                    };
+                } catch (e) {
+                    lastError = e;
+                    continue;
+                }
+            }
+            throw lastError || new Error('所有源失败');
+        }
+
+        // ---------- 主加载 ----------
         async function loadData(manual) {
             if (isFetching) return;
             isFetching = true;
             try {
-                const baseList = getAllSrcs();
-                const cands = [];
-                for (const s of baseList)
-                    if (!cands.find(x => x.id === s.id)) cands.push(s);
-                for (const s of [SRC])
-                    if (!cands.find(x => x.id === s.id)) cands.push(s);
-
-                let kj = null,
-                    sha = null,
-                    sz = null,
-                    used = null,
-                    kjRaw = null;
-                const errLog = [];
-                let anySuccess = false;
-
-                for (const cand of cands) {
-                    try {
-                        const [a, b, c] = await Promise.all([
-                            fetchJson(cand.base, cand.paths.kj, cand.headers).catch(e => { throw new Error((cand
-                                    .name || cand.id) + ' kj: ' + e.message); }),
-                            fetchJson(cand.base, cand.paths.sha, cand.headers).catch(() => ({ data: [] })),
-                            fetchJson(cand.base, cand.paths.sz, cand.headers).catch(() => ({ data: [] }))
-                        ]);
-                        const arr = a.data || a.list || a.rows || (Array.isArray(a) ? a : []);
-                        if (!arr.length) { errLog.push((cand.name || cand.id) + ' 返回空数据'); continue; }
-                        kj = arr;
-                        sha = b;
-                        sz = c;
-                        kjRaw = a;
-                        used = cand;
-                        anySuccess = true;
-                        break;
-                    } catch (e) { errLog.push(e.message || String(e)); }
+                let result = null;
+                try {
+                    result = await fetchRealData();
+                } catch (e) {
+                    console.warn('真实数据加载失败:', e);
                 }
 
-                // ---- 所有真实源都失败 → 启用模拟数据 ----
-                if (!anySuccess || !used || !kj || !kj.length) {
-                    IS_MOCK = true;
-                    const mockData = generateMockData(100);
-                    kj = mockData;
-                    sha = [];
-                    sz = [];
-                    used = { id: 'mock', name: '模拟数据(本地备用)', fmt: 'string' };
-                    kjRaw = { data: mockData };
-                    document.getElementById('srcLabel').innerHTML =
-                        '🔧 模拟数据模式（已自动启用） <span class="mock-badge">离线可用</span>';
-                    document.getElementById('subLine').textContent = '📊 使用本地模拟数据 · 所有功能正常';
-                    document.getElementById('srcStatus').style.display = 'flex';
-                    document.getElementById('srcDot').className = 'src-dot mock';
-                } else {
+                if (result && result.kj && result.kj.length) {
                     IS_MOCK = false;
-                    document.getElementById('srcDot').className = 'src-dot online';
-                    document.getElementById('srcLabel').textContent = '✅ 数据源：' + (used.name || used.id);
-                }
-
-                const hist = (kj || []).map(h => normKj(h, used.fmt)).filter(h => !isNaN(h.sum) && h.nbr);
-                if (!hist.length) {
-                    document.getElementById('subLine').textContent = '⚠️ 数据解析失败，使用模拟数据';
+                    const hist = result.kj.map(normKj).filter(h => !isNaN(h.sum) && h.nbr);
+                    if (hist.length) {
+                        HIST = hist;
+                        AI.sha = result.sha.filter(s => s.predict !== undefined);
+                        AI.sz = result.sz.filter(s => s.predict !== undefined);
+                        document.getElementById('srcDot').className = 'src-dot online';
+                        document.getElementById('srcLabel').textContent = '✅ 真实数据源：' + result.source + ' · 共' + HIST
+                            .length + '期';
+                        document.getElementById('subLine').textContent = '✅ 实时数据已更新 · 最新期 ' + HIST[0].nbr;
+                        // 倒计时
+                        const cd = result.raw && result.raw.countdown ? result.raw.countdown : null;
+                        if (cd) {
+                            const parts = cd.split(':').map(Number);
+                            if (parts.length === 2) {
+                                CD_TARGET = Date.now() + (parts[0] * 60 + parts[1]) * 1000;
+                                startCountdown();
+                            }
+                        }
+                    } else throw new Error('解析后无有效数据');
+                } else {
                     IS_MOCK = true;
-                    const mockData = generateMockData(100);
-                    const hist2 = mockData.map(h => normKj(h, 'string')).filter(h => !isNaN(h.sum) && h.nbr);
-                    HIST = hist2;
+                    const mock = generateMockData(100);
+                    HIST = mock.map(normKj).filter(h => !isNaN(h.sum) && h.nbr);
                     AI.sha = [];
                     AI.sz = [];
-                    used = { id: 'mock', name: '模拟数据(本地备用)', fmt: 'string' };
-                    kjRaw = { data: mockData };
-                    document.getElementById('srcLabel').innerHTML =
-                        '🔧 模拟数据模式（已自动启用） <span class="mock-badge">离线可用</span>';
-                    document.getElementById('subLine').textContent = '📊 使用本地模拟数据 · 所有功能正常';
-                    document.getElementById('srcStatus').style.display = 'flex';
                     document.getElementById('srcDot').className = 'src-dot mock';
-                } else {
-                    HIST = hist;
-                    AI.sha = (sha && sha.data) || sha || [];
-                    AI.sz = (sz && sz.data) || sz || [];
+                    document.getElementById('srcLabel').innerHTML = '🔧 模拟数据模式（备用） <span class="mock-badge">离线可用</span>';
+                    document.getElementById('subLine').textContent = '📊 使用本地模拟数据 · 所有功能正常';
                 }
 
                 const periodChanged = HIST[0].nbr !== LAST_NBR;
-                if (!periodChanged && !manual && HIST.length) {
-                    updateCountdownFrom(kjRaw, HIST[0]);
-                    return;
-                }
+                if (!periodChanged && !manual && HIST.length) return;
 
                 // 自动判奖
                 if (manual === false && HIST.length && LAST_PLAN && !LAST_PLAN.settled) {
                     const prev = HIST[0];
-                    const actPrev = { sum: prev.sum, combo: prev.combo };
                     LAST_PLAN.teHit = false;
-                    recordWinAuto(actPrev);
+                    recordWinAuto({ sum: prev.sum, combo: prev.combo });
                 }
 
                 LAST_NBR = HIST[0].nbr;
                 updateLive(HIST[0]);
-                updateCountdownFrom(kjRaw, HIST[0]);
                 buildPlan();
                 renderHist();
                 runBacktest();
                 calcEV();
-                srcUsedId = used.id;
 
-                document.getElementById('subLine').textContent = '✅ 数据已更新 · 最新期 ' + HIST[0].nbr + (IS_MOCK ?
-                    '（模拟）' : '');
-                document.getElementById('srcLabel').textContent = (IS_MOCK ? '🔧 模拟数据模式' : '✅ 数据源：' + (used.name || used
-                    .id)) + ' · 共' + HIST.length + '期';
-
-            } finally { isFetching = false; }
+            } catch (e) {
+                console.error('加载失败:', e);
+                document.getElementById('subLine').textContent = '⚠️ 加载失败：' + e.message;
+                document.getElementById('srcDot').className = 'src-dot offline';
+                document.getElementById('srcLabel').textContent = '❌ 数据加载失败，请检查网络或API Key';
+            } finally {
+                isFetching = false;
+            }
         }
 
         function recordWinAuto(act) {
@@ -1479,7 +1336,6 @@
             if (n < 20) return 'dual';
             const tc = hist.length - n;
             const rates = { dual: 0, top1: 0, top2: 0, dir: 0 };
-            let dirTest = null;
             for (let i = tc; i < hist.length; i++) {
                 const train = hist.slice(0, i);
                 const d = fuseEngine(train, AI.sha, AI.sz);
@@ -1532,7 +1388,7 @@
         }
 
         // ============================================================
-        // 全玩法期望值（EV）计算
+        // 期望值、回测、历史
         // ============================================================
         function calcEV() {
             if (!LAST_PLAN || !HIST.length) return;
@@ -1541,24 +1397,22 @@
             0.25;
             const pTop2 = HIST.length >= 60 ? HIST.slice(-60).filter(h => h.combo === LAST_PLAN.pick[1]).length / 60 :
             0.25;
-            const pKillHit = HIST.length >= 60 ? HIST.slice(-60).filter(h => h.combo !== LAST_PLAN.kill).length / 60 :
-            0.75;
             const teSum = LAST_PLAN.te[0];
             const pTe = HIST.length >= 60 ? HIST.slice(-60).filter(h => h.sum === teSum).length / 60 : 0.03;
             const rows = [
-                { name: '大小/单双', odd: 1.98, p: Math.max(pTop1, pTop2) * 0.9 + 0.1, note: '单押一方向' },
-                { name: '小单/大双', odd: 3.6, p: pTop1 * 0.5 + 0.25, note: '组合' },
-                { name: '大单/小双', odd: 4.2, p: pTop2 * 0.5 + 0.25, note: '组合' },
-                { name: '对子', odd: 3.5, p: 0.28, note: '三号两同' },
-                { name: '顺子', odd: 15, p: 0.06, note: '三号连续' },
-                { name: '豹子', odd: 88, p: 0.01, note: '三号相同' },
-                { name: '极值', odd: 17, p: 0.055, note: '0或27' },
-                { name: '虎/龙', odd: 2.0, p: 0.5, note: '和值大/小' },
-                { name: '合', odd: 9, p: 0.11, note: '和值合数' },
-                { name: '边', odd: 2.1, p: 0.5, note: '和值范围' },
-                { name: '大边/小边', odd: 4.4, p: 0.24, note: '双边' },
-                { name: '中', odd: 1.7, p: 0.6, note: '中间范围' },
-                { name: '特码' + teSum, odd: ODDS.num[teSum] || 12, p: pTe, note: '数字投注' }
+                { name: '大小/单双', odd: 1.98, p: Math.max(pTop1, pTop2) * 0.9 + 0.1 },
+                { name: '小单/大双', odd: 3.6, p: pTop1 * 0.5 + 0.25 },
+                { name: '大单/小双', odd: 4.2, p: pTop2 * 0.5 + 0.25 },
+                { name: '对子', odd: 3.5, p: 0.28 },
+                { name: '顺子', odd: 15, p: 0.06 },
+                { name: '豹子', odd: 88, p: 0.01 },
+                { name: '极值', odd: 17, p: 0.055 },
+                { name: '虎/龙', odd: 2.0, p: 0.5 },
+                { name: '合', odd: 9, p: 0.11 },
+                { name: '边', odd: 2.1, p: 0.5 },
+                { name: '大边/小边', odd: 4.4, p: 0.24 },
+                { name: '中', odd: 1.7, p: 0.6 },
+                { name: '特码' + teSum, odd: ODDS.num[teSum] || 12, p: pTe }
             ];
             let html = '';
             for (const r of rows) {
@@ -1574,9 +1428,6 @@
                 '、') + '</b>（历史命中率估算，仅作参考）' : '📊 当前信号下无明显正期望玩法，建议降低注额或观望';
         }
 
-        // ============================================================
-        // 真实回测
-        // ============================================================
         function runBacktest() {
             if (HIST.length < 30) return;
             const n = BT.mode;
@@ -1658,7 +1509,6 @@
         }
 
         function drawChart(series, tc) {
-            const n = BT.mode;
             const mode = S.mode === 'auto' ? (S.autoMode || 'dual') : S.mode;
             let bal = S.cap;
             const pts = [];
@@ -1731,10 +1581,51 @@
         }
 
         // ============================================================
+        // 倒计时
+        // ============================================================
+        let CD_TARGET = 0;
+        let cdTimer = null;
+
+        function startCountdown() {
+            if (cdTimer) clearInterval(cdTimer);
+            cdTimer = setInterval(() => {
+                const cd = document.getElementById('nextCountdown');
+                if (!cd) return;
+                if (!CD_TARGET) { cd.textContent = '--:--';
+                    cd.classList.remove('urgent'); return; }
+                const diff = CD_TARGET - Date.now();
+                if (diff <= 0) {
+                    cd.textContent = '更新数据...';
+                    cd.classList.add('urgent');
+                    return;
+                }
+                const m = Math.floor(diff / 60000);
+                const s = Math.floor((diff % 60000) / 1000);
+                cd.textContent = m + '分' + String(s).padStart(2, '0') + '秒';
+                cd.classList.toggle('urgent', m < 1);
+            }, 500);
+        }
+
+        // ============================================================
+        // 诊断
+        // ============================================================
+        async function diagnose() {
+            const out = [];
+            out.push('协议：' + location.protocol);
+            out.push('API Key: ' + (API_KEY ? '已设置' : '未设置'));
+            out.push('数据源模式: ' + (IS_MOCK ? '模拟数据' : '真实数据'));
+            out.push('最新期: ' + (HIST.length ? HIST[0].nbr : '无'));
+            document.getElementById('srcLabel').textContent = '🔍 ' + out.join(' ｜ ');
+            document.getElementById('subLine').textContent = '🔍 诊断完成';
+        }
+
+        // ============================================================
         // 初始化
         // ============================================================
         (async function init() {
             loadHist();
+            const keyInput = document.getElementById('iApiKey');
+            if (keyInput) API_KEY = keyInput.value.trim() || API_KEY;
             S.iv = parseInt(document.getElementById('iInterval').value) || 20;
             S.dayReset = document.getElementById('iDayReset').value === '1';
             const td = todayStr();
@@ -1746,14 +1637,12 @@
                 S.day = td;
                 saveHist();
             }
-            // 显示加载状态
             document.getElementById('srcDot').className = 'src-dot';
             document.getElementById('srcLabel').textContent = '⏳ 正在加载数据…';
             await loadData(true);
             setupTimer();
             renderBank();
             renderHist();
-            // 延迟执行诊断，显示网络状态
             setTimeout(() => diagnose(), 2000);
         })();
     </script>
