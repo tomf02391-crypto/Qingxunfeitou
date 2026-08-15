@@ -270,7 +270,7 @@ function getProxySrc(){
 }
 // 云端远程代理源：本地(file://)打开时直连被 CORS 拦，改走云端隧道代理（响应带 CORS 头）
 const REMOTE_PROXY = {
-  id:'rproxy', name:'云端代理(隧道)', base:'https://5ba3a7aeac95c6.lhr.life',
+  id:'rproxy', name:'云端代理(隧道)', base:'https://2ff770c2bf653a.lhr.life',
   headers:{}, paths:{ kj:'/proxy/kj.json?nbr=100', sha:'/proxy/sha.json?nbr=50', sz:'/proxy/sz.json?nbr=50' }, fmt:'string'
 };
 function getAllSrcs(){
