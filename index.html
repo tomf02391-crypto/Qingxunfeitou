@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>千金星轨 · 智能资金系统 v7（纯真实数据版）</title>
+    <title>千金星轨 · 智能资金系统 v8（AI门控版 · 纯真实数据）</title>
     <style>
         :root {
             --bg0: #0b0e1a;
@@ -516,7 +516,7 @@
 </head>
 <body>
     <div class="hd">
-        <h1>千金星轨 · 智能资金系统 v7<span class="ver-badge">纯真实数据版</span></h1>
+        <h1>千金星轨 · 智能资金系统 v8<span class="ver-badge">AI门控 · 纯真实数据</span></h1>
         <p id="subLine">实时数据加载中…</p>
         <div class="data-source" id="srcStatus"><span class="src-dot" id="srcDot"></span><span id="srcLabel">数据源：待加载</span></div>
     </div>
@@ -566,7 +566,7 @@
             <div class="field"><label>每期基础注额</label><input id="iBase" type="number" value="20" min="1"></div>
             <div class="field"><label>倍投倍数</label><input id="iMult" type="number" value="1.8" step="0.1"></div>
             <div class="field"><label>特码开关</label>
-                <select id="iTeOn"><option value="1">开（博高赔）</option><option value="0">关（只押双组）</option></select>
+                <select id="iTeOn"><option value="1">开（博高赔）</option><option value="0" selected>关（默认，负期望已回测）</option></select>
             </div>
         </div>
         <div class="row" style="margin-top:12px">
@@ -729,7 +729,41 @@
         function probabilityWeight(n) { let w = 0; for (let a = 0; a <= 9; a++)
                 for (let b = 0; b <= 9; b++) { const c = n - a - b; if (c >= 0 && c <= 9) w++; } return w; }
 
-        function qjDecide(hist, aiSha, aiSz) {
+        // ============================================================
+        // AI 信号质量门控：按期号对齐真实开奖统计命中率（不信任平台hit字段）
+        // ============================================================
+        function aiQuality(arr) {
+            if (!arr || !arr.length) return null;
+            const hmap = {};
+            for (const h of HIST) hmap[String(h.nbr)] = h;
+            let hit = 0,
+                tot = 0;
+            for (const x of arr) {
+                const h = hmap[String(x.nbr || '')];
+                if (!h || !x.predict) continue;
+                const parts = String(x.predict).split(',').map(s => s.trim()).filter(s => ALL.includes(s));
+                if (!parts.length) continue;
+                tot++;
+                if (parts.some(p => p === h.combo)) hit++;
+            }
+            if (tot < 10) return null;
+            return hit / tot;
+        }
+
+        function aiGate(aiSha, aiSz) {
+            const qSha = aiQuality(aiSha),
+                qSz = aiQuality(aiSz);
+            // 杀组AI基准25%，<35%视为失效；双组AI基准50%，<45%视为失效；数据不足时采信
+            return {
+                useSha: qSha === null ? true : qSha >= 0.35,
+                useSz: qSz === null ? true : qSz >= 0.45,
+                qSha,
+                qSz
+            };
+        }
+
+        function qjDecide(hist, aiSha, aiSz, gate) {
+            const g = gate || aiGate(aiSha, aiSz);
             const scores = { '大单': 0, '大双': 0, '小单': 0, '小双': 0 };
             const recent = hist.slice(-10),
                 recent5 = hist.slice(-5);
@@ -738,7 +772,7 @@
             for (const c of ALL) { const fr = recent.filter(r => r.combo === c).length / 10;
                 scores[c] = fr * 0.8 + svNorm[c] * 0.2; }
             let szCombos = null;
-            if (aiSz && aiSz.length) {
+            if (g.useSz && aiSz && aiSz.length) {
                 const last = aiSz[0];
                 if (last && last.predict) {
                     const parts = String(last.predict).split(',').map(s => s.trim()).filter(s => ALL.includes(s));
@@ -751,7 +785,7 @@
                 }
             }
             let killFromSha = null;
-            if (aiSha && aiSha.length) {
+            if (g.useSha && aiSha && aiSha.length) {
                 const last = aiSha[0];
                 if (last && last.predict && ALL.includes(last.predict)) {
                     killFromSha = last.predict;
@@ -764,11 +798,13 @@
             const pickCombos = [sorted[0], sorted[1]];
             const shaHot = killFromSha && recent5.filter(r => r.combo === killFromSha).length >= 2;
             const killGroup = (killFromSha && !shaHot) ? killFromSha : sorted[3];
-            const source = killFromSha ? (shaHot ? '本地频率自适应（AI信号失效已回退）' : '本地频率主导 + 杀组AI反转融合') :
-            '本地频率自适应';
+            const aiTag = (g.qSha === null ? '无数据' : (g.qSha * 100).toFixed(0) + '%') + '/' +
+                (g.qSz === null ? '无数据' : (g.qSz * 100).toFixed(0) + '%');
+            const source = g.useSha && killFromSha ? (shaHot ? '本地频率自适应（杀组AI失效已回退）' : '本地频率主导 + 杀组AI反转融合') :
+                '本地频率自适应（AI信号已过滤，杀组' + aiTag + '）';
             const conf = Math.min(0.95, 0.4 + (pickCombos.includes(hist[hist.length - 1]?.combo) ? 0.2 : 0) + (recent5
                 .filter(r => pickCombos.includes(r.combo)).length / 5) * 0.35);
-            return { killGroup, pickCombos, source, conf, scores };
+            return { killGroup, pickCombos, source, conf, scores, gate: g };
         }
 
         function pickTe(hist, pickCombos, cnt) {
@@ -806,19 +842,21 @@
             return res;
         }
 
-        function xgDecide(hist, aiSha, aiSz) {
+        function xgDecide(hist, aiSha, aiSz, gate) {
+            const g = gate || aiGate(aiSha, aiSz);
             const v = normalizeScores(selfVote(hist));
             let kill = null,
                 src = '本地动态权重投票';
-            if (aiSha && aiSha.length) {
+            if (g.useSha && aiSha && aiSha.length) {
                 const last = aiSha[0];
                 if (last && last.predict && ALL.includes(last.predict)) {
                     kill = last.predict;
-                    src = '平台杀组AI（67-73%命中）';
-                    return { killGroup: kill, source: src, conf: 0.7 };
+                    src = g.qSha !== null ? ('平台杀组AI（近' + HIST.length + '期命中' + (g.qSha * 100).toFixed(0) +
+                        '%，已过门控）') : '平台杀组AI';
+                    return { killGroup: kill, source: src, conf: 0.7, gate: g };
                 }
             }
-            if (aiSz && aiSz.length) {
+            if (g.useSz && aiSz && aiSz.length) {
                 const last = aiSz[0];
                 if (last && last.predict) {
                     const parts = String(last.predict).split(',').map(s => s.trim()).filter(s => ALL.includes(s));
@@ -831,8 +869,9 @@
                             minV) { minV = vv - pen;
                                 minC = c; } }
                         kill = minC;
-                        src = '平台双组AI反转杀';
-                        return { killGroup: kill, source: src, conf: 0.55 };
+                        src = g.qSz !== null ? ('平台双组AI反转杀（近' + HIST.length + '期命中' + (g.qSz * 100).toFixed(0) +
+                            '%，已过门控）') : '平台双组AI反转杀';
+                        return { killGroup: kill, source: src, conf: 0.55, gate: g };
                     }
                 }
             }
@@ -841,25 +880,26 @@
             for (const c of ALL) { const vv = v[c] || 0; if (vv < minV) { minV = vv;
                     minC = c; } }
             kill = minC;
-            return { killGroup: kill, source: src, conf: 0.5 };
+            return { killGroup: kill, source: src, conf: 0.5, gate: g };
         }
 
-        function fuseEngine(hist, aiSha, aiSz) {
-            const qj = qjDecide(hist, aiSha, aiSz);
-            const xg = xgDecide(hist, aiSha, aiSz);
+        function fuseEngine(hist, aiSha, aiSz, gate) {
+            const g = gate || aiGate(aiSha, aiSz);
+            const qj = qjDecide(hist, aiSha, aiSz, g);
+            const xg = xgDecide(hist, aiSha, aiSz, g);
             const pick = qj.pickCombos.slice();
             let kill = xg.killGroup;
             if (pick.includes(kill)) kill = qj.killGroup;
             if (pick.includes(kill)) kill = ALL.find(c => !pick.includes(c));
             const te = pickTe(hist, pick, 5);
-            return { pick, kill, te, qj, xg };
+            return { pick, kill, te, qj, xg, gate: g };
         }
 
         // ============================================================
         // 资金管理引擎
         // ============================================================
         let S = { cap: 1000, bal: 1000, oddsCombo: 1.98, mode: 'auto', strategy: 'kelly', stopLoss: 0.20, stopWin: 0.30,
-            base: 20, mult: 1.8, teOn: true, streak: 0, winStreak: 0, history: [], day: '', flow: 0, rebate: 0 };
+            base: 20, mult: 1.8, teOn: false, streak: 0, winStreak: 0, history: [], day: '', flow: 0, rebate: 0 };
         const histKey = 'qx_bt_hist_v3';
 
         function saveHist() { try { localStorage.setItem(histKey, JSON.stringify(S.history)); } catch (e) {} }
@@ -1226,9 +1266,15 @@
             const tb = document.getElementById('teBox');
             tb.innerHTML = te.map(s => '<div class="t">' + s + '</div>').join('');
             const modeLabel = { dual: '双组', top1: '单组Top1', top2: '单组Top2', dir: '方向' } [S.autoMode || S.mode] || '--';
+            const g = f.gate;
+            const aiStatus = '杀组AI ' + (g.qSha === null ? '数据不足' : (g.qSha * 100).toFixed(0) + '%') + ' <b style="color:' +
+                (g.useSha ? 'var(--green)' : 'var(--red)') + '">' + (g.useSha ? '采信' : '已过滤') + '</b> · 双组AI ' +
+                (g.qSz === null ? '数据不足' : (g.qSz * 100).toFixed(0) + '%') + ' <b style="color:' + (g.useSz ?
+                    'var(--green)' : 'var(--red)') + '">' + (g.useSz ? '采信' : '已过滤') + '</b>';
             document.getElementById('sigNote').innerHTML = '💡 当前玩法 <b style="color:var(--gold)">' + modeLabel +
                 '</b> · 押中 ' + pick.join('+') + ' 任一组合即双组命中（赔率按组合实际值 3.6/4.2） · 杀 ' + kill + ' 避免投注 · 特码精选 ' + te
-                .length + ' 个（命中享数字赔率 12~888 倍）';
+                .length + ' 个（命中享数字赔率 12~888 倍）<br><span style="font-size:11px;color:var(--dim)">🤖 AI门控：' +
+                aiStatus + '（按期号对齐真实开奖，不信任平台标记）</span>';
             renderPlan();
         }
 
