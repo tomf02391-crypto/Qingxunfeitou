@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>千金星轨 · 智能资金系统 v7（完整修复版）</title>
+    <title>千金星轨 · 智能资金系统 v7（纯真实数据版）</title>
     <style>
         :root {
             --bg0: #0b0e1a;
@@ -486,19 +486,6 @@
             vertical-align: middle;
             letter-spacing: .5px
         }
-        .mock-badge {
-            display: inline-block;
-            margin-left: 8px;
-            padding: 2px 10px;
-            border: 1px solid #ff7b4a;
-            border-radius: 999px;
-            font-size: 11px;
-            font-weight: 700;
-            color: #ff7b4a;
-            vertical-align: middle;
-            letter-spacing: .5px;
-            background: rgba(255, 123, 74, .12)
-        }
         .data-source {
             font-size: 11px;
             color: var(--dim);
@@ -518,9 +505,6 @@
         .data-source .src-dot.online {
             background: var(--green)
         }
-        .data-source .src-dot.mock {
-            background: #ff7b4a
-        }
         .data-source .src-dot.offline {
             background: var(--red)
         }
@@ -532,7 +516,7 @@
 </head>
 <body>
     <div class="hd">
-        <h1>千金星轨 · 智能资金系统 v7<span class="ver-badge">完整修复版</span></h1>
+        <h1>千金星轨 · 智能资金系统 v7<span class="ver-badge">纯真实数据版</span></h1>
         <p id="subLine">实时数据加载中…</p>
         <div class="data-source" id="srcStatus"><span class="src-dot" id="srcDot"></span><span id="srcLabel">数据源：待加载</span></div>
     </div>
@@ -1041,7 +1025,7 @@
         function fmt(n) { return Number(n).toLocaleString('zh-CN', { minimumFractionDigits: 1, maximumFractionDigits: 1 }); }
 
         // ============================================================
-        // 数据加载 — 支持多源 + 模拟备用
+        // 数据加载 — 仅真实数据，无模拟备用
         // ============================================================
         let HIST = [],
             AI = { sha: [], sz: [] };
@@ -1049,7 +1033,6 @@
         let BT = { stats: null, rows: [], mode: 30 };
         let timer = null;
         let API_KEY = 'yu28_f9f41d673b447fac';
-        let IS_MOCK = false;
 
         function setupTimer() {
             if (timer) clearInterval(timer);
@@ -1058,36 +1041,6 @@
 
         let isFetching = false;
         let LAST_NBR = '';
-
-        // ---------- 模拟数据 ----------
-        function generateMockData(count) {
-            const combos = ['大单', '大双', '小单', '小双'];
-            const data = [];
-            let seed = 20260815;
-            const seededRandom = () => { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; };
-            const now = new Date();
-            for (let i = 0; i < count; i++) {
-                const r = seededRandom();
-                const combo = combos[Math.floor(r * 4) % 4];
-                let sum;
-                if (combo === '大单') sum = 15 + Math.floor(seededRandom() * 13);
-                else if (combo === '大双') sum = 14 + Math.floor(seededRandom() * 13);
-                else if (combo === '小单') sum = 1 + Math.floor(seededRandom() * 13);
-                else sum = 2 + Math.floor(seededRandom() * 12);
-                sum = Math.max(0, Math.min(27, Math.round(sum)));
-                const nbr = String(20260815001 + (count - 1 - i));
-                const date = new Date(now);
-                date.setMinutes(date.getMinutes() - i * 10 - Math.floor(seededRandom() * 3));
-                data.push({
-                    nbr: nbr,
-                    number: '和值=' + sum,
-                    num: sum,
-                    combination: combo,
-                    time: date.toISOString().replace('T', ' ').slice(0, 19)
-                });
-            }
-            return data;
-        }
 
         // ---------- 归一化 ----------
         function normKj(h) {
@@ -1126,7 +1079,7 @@
                 paths: { kj: '/api/kj.json?nbr=100', sz: '/api/sz.json?nbr=50', sha: '/api/sha.json?nbr=50' }
             });
 
-            // 2. 同源代理
+            // 2. 同源代理（如果页面部署在服务器上）
             if (location.protocol === 'https:' || location.protocol === 'http:') {
                 sources.push({
                     id: 'proxy',
@@ -1146,7 +1099,7 @@
                 paths: { kj: '/proxy/kj.json?nbr=100', sz: '/proxy/sz.json?nbr=50', sha: '/proxy/sha.json?nbr=50' }
             });
 
-            // 4. CORS代理
+            // 4. CORS代理（将Key放在URL中，注意安全）
             const corsProxy = 'https://api.allorigins.win/raw?url=';
             sources.push({
                 id: 'cors',
@@ -1191,7 +1144,7 @@
                     continue;
                 }
             }
-            throw lastError || new Error('所有源失败');
+            throw lastError || new Error('所有真实数据源均不可用');
         }
 
         // ---------- 主加载 ----------
@@ -1199,43 +1152,28 @@
             if (isFetching) return;
             isFetching = true;
             try {
-                let result = null;
-                try {
-                    result = await fetchRealData();
-                } catch (e) {
-                    console.warn('真实数据加载失败:', e);
-                }
+                // 仅尝试真实数据，不生成模拟
+                const result = await fetchRealData();
 
-                if (result && result.kj && result.kj.length) {
-                    IS_MOCK = false;
-                    const hist = result.kj.map(normKj).filter(h => !isNaN(h.sum) && h.nbr);
-                    if (hist.length) {
-                        HIST = hist;
-                        AI.sha = result.sha.filter(s => s.predict !== undefined);
-                        AI.sz = result.sz.filter(s => s.predict !== undefined);
-                        document.getElementById('srcDot').className = 'src-dot online';
-                        document.getElementById('srcLabel').textContent = '✅ 真实数据源：' + result.source + ' · 共' + HIST
-                            .length + '期';
-                        document.getElementById('subLine').textContent = '✅ 实时数据已更新 · 最新期 ' + HIST[0].nbr;
-                        // 倒计时
-                        const cd = result.raw && result.raw.countdown ? result.raw.countdown : null;
-                        if (cd) {
-                            const parts = cd.split(':').map(Number);
-                            if (parts.length === 2) {
-                                CD_TARGET = Date.now() + (parts[0] * 60 + parts[1]) * 1000;
-                                startCountdown();
-                            }
-                        }
-                    } else throw new Error('解析后无有效数据');
-                } else {
-                    IS_MOCK = true;
-                    const mock = generateMockData(100);
-                    HIST = mock.map(normKj).filter(h => !isNaN(h.sum) && h.nbr);
-                    AI.sha = [];
-                    AI.sz = [];
-                    document.getElementById('srcDot').className = 'src-dot mock';
-                    document.getElementById('srcLabel').innerHTML = '🔧 模拟数据模式（备用） <span class="mock-badge">离线可用</span>';
-                    document.getElementById('subLine').textContent = '📊 使用本地模拟数据 · 所有功能正常';
+                // 成功获取
+                const hist = result.kj.map(normKj).filter(h => !isNaN(h.sum) && h.nbr);
+                if (!hist.length) throw new Error('解析后无有效数据');
+
+                HIST = hist;
+                AI.sha = result.sha.filter(s => s.predict !== undefined);
+                AI.sz = result.sz.filter(s => s.predict !== undefined);
+                document.getElementById('srcDot').className = 'src-dot online';
+                document.getElementById('srcLabel').textContent = '✅ 真实数据源：' + result.source + ' · 共' + HIST.length +
+                    '期';
+                document.getElementById('subLine').textContent = '✅ 实时数据已更新 · 最新期 ' + HIST[0].nbr;
+                // 倒计时
+                const cd = result.raw && result.raw.countdown ? result.raw.countdown : null;
+                if (cd) {
+                    const parts = cd.split(':').map(Number);
+                    if (parts.length === 2) {
+                        CD_TARGET = Date.now() + (parts[0] * 60 + parts[1]) * 1000;
+                        startCountdown();
+                    }
                 }
 
                 const periodChanged = HIST[0].nbr !== LAST_NBR;
@@ -1256,10 +1194,23 @@
                 calcEV();
 
             } catch (e) {
-                console.error('加载失败:', e);
-                document.getElementById('subLine').textContent = '⚠️ 加载失败：' + e.message;
+                console.error('真实数据加载失败:', e);
+                // 清除旧数据，避免展示过期信息（可选，保持旧数据也可）
+                // 我们保留旧数据，但更新状态为错误
+                document.getElementById('subLine').textContent = '⚠️ 真实数据加载失败：' + e.message;
                 document.getElementById('srcDot').className = 'src-dot offline';
-                document.getElementById('srcLabel').textContent = '❌ 数据加载失败，请检查网络或API Key';
+                document.getElementById('srcLabel').textContent = '❌ 真实数据加载失败，请检查网络或API Key';
+                // 不生成模拟数据，不修改HIST
+                // 如果之前有数据，可保留显示，但标记为过期
+                if (HIST.length) {
+                    document.getElementById('subLine').textContent = '⚠️ 数据已过期，最新加载失败：' + e.message;
+                } else {
+                    // 无任何数据，所有显示保持--
+                    document.getElementById('liveInfo').textContent = '数据不可用';
+                    document.getElementById('sigQj').textContent = '--';
+                    document.getElementById('sigXg').textContent = '--';
+                    document.getElementById('planBox').innerHTML = '<div style="color:var(--dim);font-size:13px">无数据</div>';
+                }
             } finally {
                 isFetching = false;
             }
@@ -1613,7 +1564,7 @@
             const out = [];
             out.push('协议：' + location.protocol);
             out.push('API Key: ' + (API_KEY ? '已设置' : '未设置'));
-            out.push('数据源模式: ' + (IS_MOCK ? '模拟数据' : '真实数据'));
+            out.push('数据源模式: 真实数据');
             out.push('最新期: ' + (HIST.length ? HIST[0].nbr : '无'));
             document.getElementById('srcLabel').textContent = '🔍 ' + out.join(' ｜ ');
             document.getElementById('subLine').textContent = '🔍 诊断完成';
@@ -1638,7 +1589,7 @@
                 saveHist();
             }
             document.getElementById('srcDot').className = 'src-dot';
-            document.getElementById('srcLabel').textContent = '⏳ 正在加载数据…';
+            document.getElementById('srcLabel').textContent = '⏳ 正在加载真实数据…';
             await loadData(true);
             setupTimer();
             renderBank();
