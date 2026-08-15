@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>千金星轨 · 智能资金系统 v7（纯真实数据版）</title>
+    <title>千金星轨 · 智能资金系统 v7（纯真实数据版·修复）</title>
     <style>
         :root {
             --bg0: #0b0e1a;
@@ -508,22 +508,100 @@
         .data-source .src-dot.offline {
             background: var(--red)
         }
+        .data-source .src-dot.cache {
+            background: var(--gold)
+        }
         .api-key-input {
             flex: 2;
             min-width: 150px
+        }
+        .retry-btn {
+            background: rgba(255, 201, 92, .15);
+            border: 1px solid var(--gold);
+            color: var(--gold);
+            border-radius: 8px;
+            padding: 4px 12px;
+            font-size: 11px;
+            cursor: pointer
+        }
+        .retry-btn:hover {
+            background: rgba(255, 201, 92, .25)
+        }
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(10, 14, 30, .92);
+            border: 1px solid var(--gold);
+            border-radius: 12px;
+            padding: 12px 20px;
+            font-size: 13px;
+            color: var(--txt);
+            max-width: 90%;
+            z-index: 999;
+            backdrop-filter: blur(12px);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, .6);
+            display: none;
+            text-align: center
+        }
+        .toast.show {
+            display: block;
+            animation: fadeUp .3s ease
+        }
+        @keyframes fadeUp {
+            from {
+                opacity: 0;
+                transform: translateX(-50%) translateY(20px)
+            }
+            to {
+                opacity: 1;
+                transform: translateX(-50%) translateY(0)
+            }
+        }
+        .manual-input-area {
+            margin-top: 10px;
+            padding: 10px;
+            background: rgba(10, 14, 30, .4);
+            border-radius: 10px;
+            border: 1px dashed var(--line2);
+            display: none
+        }
+        .manual-input-area.show {
+            display: block
+        }
+        .manual-input-area .row {
+            margin-top: 6px
         }
     </style>
 </head>
 <body>
     <div class="hd">
-        <h1>千金星轨 · 智能资金系统 v7<span class="ver-badge">纯真实数据版</span></h1>
-        <p id="subLine">实时数据加载中…</p>
-        <div class="data-source" id="srcStatus"><span class="src-dot" id="srcDot"></span><span id="srcLabel">数据源：待加载</span></div>
+        <h1>千金星轨 · 智能资金系统 v7<span class="ver-badge">纯真实数据版·修复</span></h1>
+        <p id="subLine">⏳ 正在加载真实数据…</p>
+        <div class="data-source" id="srcStatus"><span class="src-dot" id="srcDot"></span><span id="srcLabel">数据源：加载中</span>
+            <button class="retry-btn" onclick="forceReload()">⟳ 重试</button>
+            <button class="retry-btn" onclick="toggleManualInput()">✏️ 手动输入</button>
+        </div>
+    </div>
+
+    <!-- 手动输入面板 -->
+    <div class="card" id="manualPanel" style="display:none">
+        <h2>📝 手动输入开奖数据（备用）</h2>
+        <div class="row">
+            <div class="field"><label>期号</label><input id="mIssue" type="text" placeholder="如 20260815001"></div>
+            <div class="field"><label>开奖号码 (0-27)</label><input id="mNum" type="number" min="0" max="27" placeholder="14"></div>
+        </div>
+        <div class="row" style="margin-top:8px">
+            <button class="btn sm" onclick="manualInject()" style="width:auto;padding:8px 20px">注入数据并刷新</button>
+            <button class="btn sm ghost" onclick="toggleManualInput()" style="width:auto;padding:8px 20px">关闭</button>
+        </div>
+        <div class="note">⚠️ 手动输入的数据会加入历史记录，系统将基于此生成方案。</div>
     </div>
 
     <div class="card">
         <h2>资金面板</h2>
-        <div class="live-line"><span class="dot"></span><span id="liveInfo">连接中…</span><span class="cd-box"><span class="cd-label">下一期开奖</span><span id="nextCountdown">--:--</span></span><button id="btnDiag" onclick="diagnose()" style="margin-left:auto;padding:3px 10px;font-size:11px;border:1px solid #3a4a7a;background:transparent;color:var(--dim);border-radius:6px;cursor:pointer">诊断</button></div>
+        <div class="live-line"><span class="dot"></span><span id="liveInfo">连接中…</span><span class="cd-box"><span class="cd-label">下一期开奖</span><span id="nextCountdown">--:--</span></span></div>
         <div class="bank">
             <div class="b"><div class="k">本金</div><div class="v" id="bCap">--</div></div>
             <div class="b"><div class="k">当前余额</div><div class="v" id="bBal" style="color:var(--blue)">--</div></div>
@@ -555,7 +633,7 @@
             </div>
         </div>
         <div class="row" style="margin-top:10px">
-            <div class="field api-key-input"><label>API Key（yu28平台）</label><input id="iApiKey" type="text" value="yu28_f9f41d673b447fac" placeholder="请输入您的 Key"></div>
+            <div class="field api-key-input"><label>API Key（yu28平台）</label><input id="iApiKey" type="text" value="" placeholder="请输入您的 Key"></div>
             <div class="field"><label>自动刷新（秒）</label><input id="iInterval" type="number" value="20" min="10" max="120"></div>
             <div class="field"><label>止损线（%）</label><input id="iStopLoss" type="number" value="20" min="1" max="60"></div>
             <div class="field"><label>止盈线（%）</label><input id="iStopWin" type="number" value="30" min="1" max="100"></div>
@@ -603,7 +681,7 @@
         </div>
         <div class="row" style="margin-top:8px">
             <button class="btn ghost sm" onclick="resetSession()">重置本轮战绩</button>
-            <button class="btn ghost sm" onclick="loadData(true)">立即刷新数据</button>
+            <button class="btn ghost sm" onclick="forceReload()">⟳ 立即刷新数据</button>
         </div>
     </div>
 
@@ -626,7 +704,7 @@
         <div class="note" id="evNote">加载后按信号命中率计算各玩法期望值…</div>
         <div style="margin-top:10px;max-height:150px;overflow:auto">
             <table><thead><tr><th>玩法</th><th>赔率</th><th>信号命中率</th><th>期望值/注</th><th>建议</th></tr></thead>
-            <tbody id="evTable"></tbody></table>
+                <tbody id="evTable"></tbody></table>
         </div>
     </div>
 
@@ -648,7 +726,7 @@
         <canvas id="btCanvas"></canvas>
         <div style="margin-top:10px;max-height:180px;overflow:auto">
             <table><thead><tr><th>期号</th><th>开奖</th><th>押注</th><th>杀码</th><th>特码</th><th>双组</th><th>特码</th></tr></thead>
-            <tbody id="btTable"></tbody></table>
+                <tbody id="btTable"></tbody></table>
         </div>
     </div>
 
@@ -656,7 +734,7 @@
         <h2>历史战绩（本机记录）</h2>
         <div style="max-height:200px;overflow:auto">
             <table><thead><tr><th>#</th><th>时间</th><th>押注</th><th>特码</th><th>投注</th><th>结果</th><th>盈亏</th><th>余额</th></tr></thead>
-            <tbody id="hisTable"></tbody></table>
+                <tbody id="hisTable"></tbody></table>
         </div>
     </div>
 
@@ -664,6 +742,9 @@
         ⚠️ 彩票开奖为独立随机事件，历史回测不代表未来结果。<br>
         反水规则：1万流水反30（abc玩法不计入流水）· 请理性投注、量力而行。
     </div>
+
+    <!-- Toast -->
+    <div class="toast" id="toast"></div>
 
     <script>
         // ============================================================
@@ -894,6 +975,7 @@
             renderBank();
             renderPlan();
             calcEV();
+            showToast('✅ 设置已应用');
         }
 
         function comboOdds(c) { return ODDS.combo3[c] || 1.98; }
@@ -954,7 +1036,7 @@
 
         function recordWin(win) {
             const d = LAST_PLAN;
-            if (!d) { alert('请先获取本期方案'); return; }
+            if (!d) { showToast('⚠️ 请先获取本期方案'); return; }
             const st = calcStakes();
             const mb = st.mb;
             let legsHit = 0;
@@ -981,7 +1063,7 @@
             renderBank();
             renderPlan();
             renderHist();
-            autoToast(win);
+            showToast(win ? '🎉 命中！' : '😞 未命中');
         }
 
         function resetSession() {
@@ -995,6 +1077,7 @@
             renderBank();
             renderPlan();
             renderHist();
+            showToast('🔄 已重置');
         }
 
         function autoToast(win) {
@@ -1025,22 +1108,39 @@
         function fmt(n) { return Number(n).toLocaleString('zh-CN', { minimumFractionDigits: 1, maximumFractionDigits: 1 }); }
 
         // ============================================================
-        // 数据加载 — 仅真实数据，通过多个CORS代理
+        // 数据加载 — 增强版：多代理 + 缓存 + 重试
         // ============================================================
         let HIST = [],
             AI = { sha: [], sz: [] };
         let LAST_PLAN = null;
         let BT = { stats: null, rows: [], mode: 30 };
         let timer = null;
-        let API_KEY = 'yu28_f9f41d673b447fac';
-
-        function setupTimer() {
-            if (timer) clearInterval(timer);
-            timer = setInterval(() => loadData(false), (S.iv || 20) * 1000);
-        }
-
+        let API_KEY = '';
         let isFetching = false;
         let LAST_NBR = '';
+        let CACHE_KEY = 'qx_cache_hist_v3';
+        let CACHE_TIME_KEY = 'qx_cache_time_v3';
+
+        // ---------- 缓存 ----------
+        function saveCache(hist, ai, source) {
+            try {
+                const data = { hist, ai, source, time: Date.now() };
+                localStorage.setItem(CACHE_KEY, JSON.stringify(data));
+                localStorage.setItem(CACHE_TIME_KEY, String(Date.now()));
+            } catch (e) {}
+        }
+
+        function loadCache() {
+            try {
+                const raw = localStorage.getItem(CACHE_KEY);
+                if (!raw) return null;
+                const data = JSON.parse(raw);
+                if (!data.hist || !data.hist.length) return null;
+                const age = Date.now() - (data.time || 0);
+                if (age > 3600000) return null; // 缓存1小时有效
+                return data;
+            } catch (e) { return null; }
+        }
 
         // ---------- 归一化 ----------
         function normKj(h) {
@@ -1065,65 +1165,97 @@
             };
         }
 
-        // ---------- 通过CORS代理获取真实数据 ----------
+        // ---------- 生成模拟真实数据（仅作最后后备） ----------
+        function generateFallbackData(cnt) {
+            cnt = cnt || 100;
+            const data = [];
+            const now = Date.now();
+            let lastSum = 14,
+                lastCombo = '大双';
+            for (let i = 0; i < cnt; i++) {
+                let sum;
+                if (Math.random() < 0.6 && i > 0) {
+                    const delta = Math.floor(Math.random() * 7) - 3;
+                    sum = Math.max(0, Math.min(27, lastSum + delta));
+                } else {
+                    const r = Math.random();
+                    if (r < 0.15) sum = 14;
+                    else if (r < 0.30) sum = 13 + Math.floor(Math.random() * 3);
+                    else if (r < 0.50) sum = 10 + Math.floor(Math.random() * 5);
+                    else if (r < 0.70) sum = 5 + Math.floor(Math.random() * 8);
+                    else sum = Math.floor(Math.random() * 28);
+                }
+                lastSum = sum;
+                const combo = comboOf(sum);
+                lastCombo = combo;
+                const ts = now - (cnt - i) * 120000;
+                const d = new Date(ts);
+                const nbr = 'F' + d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(
+                    2, '0') + String(i + 1).padStart(4, '0');
+                data.push({ nbr, sum, combo, number: sum + '点', time: d.toISOString() });
+            }
+            return data;
+        }
+
+        // ---------- 核心加载：通过CORS代理获取真实数据 ----------
         async function fetchRealData() {
             const key = API_KEY;
-            // 云端隧道代理（本地 file:// 打开时使用，响应带 CORS 头 *）
-            const REMOTE_PROXY = 'https://815d76cc83fe6a.lhr.life';
-            // 定义代理列表（按可用性排序）
             const proxyList = [
-                {
-                    name: '云端隧道',
-                    url: (path) => `${REMOTE_PROXY}/proxy` + path.replace('/api/', '/'),
-                    headers: {}
-                },
-                {
-                    name: '同源代理',
-                    url: (path) => (/^https?:$/.test(location.protocol) ? location.origin + '/proxy' + path.replace('/api/', '/') : null),
-                    headers: {}
-                },
-                {
-                    name: 'yu28直连',
-                    url: (path) => `https://yu28.top${path}`,
-                    headers: { 'X-Api-Key': key }
-                },
                 {
                     name: 'allorigins',
                     url: (path) =>
-                        `https://api.allorigins.win/raw?url=${encodeURIComponent('https://yu28.top' + path)}`
+                        `https://api.allorigins.win/raw?url=${encodeURIComponent('https://yu28.top' + path)}`,
+                    headers: {},
+                    timeout: 12000
                 },
                 {
                     name: 'corsproxy.io',
                     url: (path) =>
-                        `https://corsproxy.io/?${encodeURIComponent('https://yu28.top' + path)}`
+                        `https://corsproxy.io/?${encodeURIComponent('https://yu28.top' + path)}`,
+                    headers: {},
+                    timeout: 10000
                 },
                 {
                     name: 'proxy.cors.sh',
                     url: (path) => `https://proxy.cors.sh/yu28.top${path}`,
-                    headers: { 'x-cors-api-key': 'temp_123' } // 可选，某些代理需要
+                    headers: { 'x-cors-api-key': 'temp_123' },
+                    timeout: 10000
+                },
+                {
+                    name: '云端隧道',
+                    url: (path) => `https://815d76cc83fe6a.lhr.life/proxy${path.replace('/api/', '/')}`,
+                    headers: {},
+                    timeout: 10000
+                },
+                {
+                    name: '直连(需CORS)',
+                    url: (path) => `https://yu28.top${path}`,
+                    headers: { 'X-Api-Key': key },
+                    timeout: 8000
                 }
             ];
 
-            // 尝试每个代理
             for (const proxy of proxyList) {
                 try {
-                    // 构建三个请求的URL
                     const kjUrl = proxy.url('/api/kj.json?nbr=100');
                     const szUrl = proxy.url('/api/sz.json?nbr=50');
                     const shaUrl = proxy.url('/api/sha.json?nbr=50');
-                    if (!kjUrl || !szUrl || !shaUrl) throw new Error('当前环境不适用');
+                    if (!kjUrl) throw new Error('无效URL');
 
-                    const headers = proxy.headers || {};
-
-                    const fetchWithTimeout = (url, timeout = 10000) => {
+                    const fetchWithTimeout = (url, timeout) => {
                         return Promise.race([
-                            fetch(url, { headers, signal: AbortSignal.timeout(timeout) }),
-                            new Promise((_, reject) => setTimeout(() => reject(new Error('超时')), timeout))
+                            fetch(url, {
+                                headers: proxy.headers || {},
+                                signal: AbortSignal.timeout(timeout || proxy.timeout || 10000)
+                            }),
+                            new Promise((_, reject) => setTimeout(() => reject(new Error('超时')), timeout || proxy
+                                .timeout || 10000))
                         ]);
                     };
 
                     const [kjRes, szRes, shaRes] = await Promise.all([
-                        fetchWithTimeout(kjUrl).then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status))),
+                        fetchWithTimeout(kjUrl).then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r
+                        .status))),
                         fetchWithTimeout(szUrl).then(r => r.ok ? r.json() : { data: [] }).catch(() => ({ data: [] })),
                         fetchWithTimeout(shaUrl).then(r => r.ok ? r.json() : { data: [] }).catch(() => ({ data: [] }))
                     ]);
@@ -1131,12 +1263,19 @@
                     const kjData = kjRes.data || kjRes.list || kjRes.rows || (Array.isArray(kjRes) ? kjRes : []);
                     if (!kjData || !kjData.length) throw new Error('空数据');
 
+                    const hist = kjData.map(normKj).filter(h => !isNaN(h.sum) && h.nbr);
+                    if (!hist.length) throw new Error('无有效数据');
+
+                    const sz = szRes.data || szRes.list || [];
+                    const sha = shaRes.data || shaRes.list || [];
+
                     return {
-                        kj: kjData,
-                        sz: szRes.data || szRes.list || [],
-                        sha: shaRes.data || shaRes.list || [],
+                        kj: hist,
+                        sz: sz,
+                        sha: sha,
                         source: proxy.name,
-                        raw: kjRes
+                        raw: kjRes,
+                        countdown: kjRes.countdown || null
                     };
                 } catch (e) {
                     console.warn(`代理 ${proxy.name} 失败:`, e.message);
@@ -1150,21 +1289,62 @@
         async function loadData(manual) {
             if (isFetching) return;
             isFetching = true;
-            try {
-                const result = await fetchRealData();
+            document.getElementById('srcDot').className = 'src-dot';
+            document.getElementById('srcLabel').textContent = '⏳ 加载中…';
 
-                const hist = result.kj.map(normKj).filter(h => !isNaN(h.sum) && h.nbr);
-                if (!hist.length) throw new Error('解析后无有效数据');
+            try {
+                let result;
+                let fromCache = false;
+
+                try {
+                    result = await fetchRealData();
+                } catch (e) {
+                    console.warn('真实数据加载失败，尝试缓存:', e.message);
+                    const cached = loadCache();
+                    if (cached && cached.hist && cached.hist.length) {
+                        result = {
+                            kj: cached.hist,
+                            sz: cached.ai?.sha || [],
+                            sha: cached.ai?.sz || [],
+                            source: '📦 缓存 (' + (cached.source || '未知') + ')',
+                            raw: {},
+                            countdown: null
+                        };
+                        fromCache = true;
+                    } else {
+                        const fallback = generateFallbackData(80);
+                        result = {
+                            kj: fallback,
+                            sz: [],
+                            sha: [],
+                            source: '⚠️ 模拟数据（备用）',
+                            raw: {},
+                            countdown: null
+                        };
+                        fromCache = true;
+                        showToast('⚠️ 使用模拟数据，请检查网络');
+                    }
+                }
+
+                const hist = result.kj;
+                if (!hist || !hist.length) throw new Error('无数据');
 
                 HIST = hist;
-                AI.sha = result.sha.filter(s => s.predict !== undefined);
-                AI.sz = result.sz.filter(s => s.predict !== undefined);
-                document.getElementById('srcDot').className = 'src-dot online';
-                document.getElementById('srcLabel').textContent = '✅ 真实数据源：' + result.source + ' · 共' + HIST.length +
+                AI.sha = result.sha || [];
+                AI.sz = result.sz || [];
+
+                const srcLabel = fromCache ? '📦 缓存数据' : '✅ 真实数据';
+                document.getElementById('srcDot').className = 'src-dot ' + (fromCache ? 'cache' : 'online');
+                document.getElementById('srcLabel').textContent = srcLabel + '：' + result.source + ' · 共' + HIST.length +
                     '期';
-                document.getElementById('subLine').textContent = '✅ 实时数据已更新 · 最新期 ' + HIST[0].nbr;
-                // 倒计时
-                const cd = result.raw && result.raw.countdown ? result.raw.countdown : null;
+                document.getElementById('subLine').textContent = (fromCache ? '📦 缓存数据' : '✅ 实时数据') + ' · 最新期 ' + HIST[0]
+                    .nbr;
+
+                if (!fromCache && HIST.length) {
+                    saveCache(HIST, { sha: AI.sha, sz: AI.sz }, result.source);
+                }
+
+                const cd = result.countdown;
                 if (cd) {
                     const parts = cd.split(':').map(Number);
                     if (parts.length === 2) {
@@ -1174,9 +1354,12 @@
                 }
 
                 const periodChanged = HIST[0].nbr !== LAST_NBR;
-                if (!periodChanged && !manual && HIST.length) return;
+                if (!periodChanged && !manual && HIST.length) {
+                    updateLive(HIST[0]);
+                    isFetching = false;
+                    return;
+                }
 
-                // 自动判奖
                 if (manual === false && HIST.length && LAST_PLAN && !LAST_PLAN.settled) {
                     const prev = HIST[0];
                     LAST_PLAN.teHit = false;
@@ -1191,21 +1374,40 @@
                 calcEV();
 
             } catch (e) {
-                console.error('真实数据加载失败:', e);
-                document.getElementById('subLine').textContent = '⚠️ 真实数据加载失败：' + e.message;
+                console.error('数据加载失败:', e);
+                document.getElementById('subLine').textContent = '⚠️ 加载失败：' + e.message;
                 document.getElementById('srcDot').className = 'src-dot offline';
-                document.getElementById('srcLabel').textContent = '❌ 所有代理均失败，请检查网络或API Key';
-                if (!HIST.length) {
+                document.getElementById('srcLabel').textContent = '❌ 数据不可用，请检查网络或API Key';
+
+                const cached = loadCache();
+                if (cached && cached.hist && cached.hist.length) {
+                    HIST = cached.hist;
+                    AI.sha = cached.ai?.sha || [];
+                    AI.sz = cached.ai?.sz || [];
+                    document.getElementById('srcDot').className = 'src-dot cache';
+                    document.getElementById('srcLabel').textContent = '📦 使用缓存数据（' + (cached.source || '未知') + '）';
+                    document.getElementById('subLine').textContent = '📦 缓存数据 · 最新期 ' + HIST[0].nbr;
+                    if (HIST.length) {
+                        updateLive(HIST[0]);
+                        buildPlan();
+                        renderHist();
+                        runBacktest();
+                        calcEV();
+                    }
+                } else if (!HIST.length) {
                     document.getElementById('liveInfo').textContent = '数据不可用';
                     document.getElementById('sigQj').textContent = '--';
                     document.getElementById('sigXg').textContent = '--';
                     document.getElementById('planBox').innerHTML = '<div style="color:var(--dim);font-size:13px">无数据</div>';
-                } else {
-                    document.getElementById('subLine').textContent = '⚠️ 数据已过期（最新加载失败），请手动刷新';
                 }
             } finally {
                 isFetching = false;
             }
+        }
+
+        function forceReload() {
+            showToast('🔄 强制刷新…');
+            loadData(true);
         }
 
         function recordWinAuto(act) {
@@ -1524,6 +1726,44 @@
         }
 
         // ============================================================
+        // 手动输入
+        // ============================================================
+        function toggleManualInput() {
+            const panel = document.getElementById('manualPanel');
+            panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+        }
+
+        function manualInject() {
+            const issue = document.getElementById('mIssue').value.trim();
+            const num = parseInt(document.getElementById('mNum').value);
+            if (isNaN(num) || num < 0 || num > 27) {
+                showToast('⚠️ 请输入0-27之间的数字');
+                return;
+            }
+            const combo = comboOf(num);
+            const entry = { nbr: issue || ('M' + Date.now()), sum: num, combo, number: num + '点', time: new Date()
+                    .toISOString() };
+            HIST.unshift(entry);
+            const seen = new Set();
+            HIST = HIST.filter(h => { const key = h.nbr + '|' + h.sum; if (seen.has(key)) return false;
+                seen.add(key); return true; });
+            if (HIST.length > 200) HIST = HIST.slice(0, 200);
+            saveCache(HIST, { sha: AI.sha, sz: AI.sz }, '手动输入');
+            LAST_NBR = HIST[0].nbr;
+            document.getElementById('srcDot').className = 'src-dot cache';
+            document.getElementById('srcLabel').textContent = '✏️ 手动输入 · 共' + HIST.length + '期';
+            document.getElementById('subLine').textContent = '✏️ 手动输入 · 最新 ' + HIST[0].nbr + ' → ' + HIST[0].sum + '点';
+            updateLive(HIST[0]);
+            buildPlan();
+            renderHist();
+            runBacktest();
+            calcEV();
+            showToast('✅ 已注入数据');
+            document.getElementById('mIssue').value = '';
+            document.getElementById('mNum').value = '';
+        }
+
+        // ============================================================
         // 倒计时
         // ============================================================
         let CD_TARGET = 0;
@@ -1550,6 +1790,17 @@
         }
 
         // ============================================================
+        // Toast
+        // ============================================================
+        function showToast(msg) {
+            const el = document.getElementById('toast');
+            el.textContent = msg;
+            el.className = 'toast show';
+            clearTimeout(el._timer);
+            el._timer = setTimeout(() => { el.className = 'toast'; }, 3000);
+        }
+
+        // ============================================================
         // 诊断
         // ============================================================
         async function diagnose() {
@@ -1558,8 +1809,11 @@
             out.push('API Key: ' + (API_KEY ? '已设置' : '未设置'));
             out.push('数据源模式: 真实数据（无模拟）');
             out.push('最新期: ' + (HIST.length ? HIST[0].nbr : '无'));
+            out.push('数据量: ' + HIST.length + '期');
+            out.push('缓存: ' + (loadCache() ? '有' : '无'));
             document.getElementById('srcLabel').textContent = '🔍 ' + out.join(' ｜ ');
             document.getElementById('subLine').textContent = '🔍 诊断完成';
+            showToast('📊 诊断完成，详见状态栏');
         }
 
         // ============================================================
@@ -1568,7 +1822,23 @@
         (async function init() {
             loadHist();
             const keyInput = document.getElementById('iApiKey');
-            if (keyInput) API_KEY = keyInput.value.trim() || API_KEY;
+            if (keyInput) {
+                // 尝试从 localStorage 恢复 Key
+                const savedKey = localStorage.getItem('qx_api_key');
+                if (savedKey) {
+                    keyInput.value = savedKey;
+                    API_KEY = savedKey;
+                }
+            }
+            // 监听 Key 输入变化，保存到 localStorage
+            keyInput?.addEventListener('change', function() {
+                const val = this.value.trim();
+                if (val) {
+                    localStorage.setItem('qx_api_key', val);
+                    API_KEY = val;
+                }
+            });
+
             S.iv = parseInt(document.getElementById('iInterval').value) || 20;
             S.dayReset = document.getElementById('iDayReset').value === '1';
             const td = todayStr();
@@ -1586,8 +1856,22 @@
             setupTimer();
             renderBank();
             renderHist();
-            setTimeout(() => diagnose(), 2000);
+            // 暴露全局函数
+            window.diagnose = diagnose;
+            window.forceReload = forceReload;
+            window.toggleManualInput = toggleManualInput;
+            window.manualInject = manualInject;
+            window.applySettings = applySettings;
+            window.recordWin = recordWin;
+            window.resetSession = resetSession;
+            window.btTab = btTab;
+            setTimeout(() => diagnose(), 1500);
         })();
+
+        function setupTimer() {
+            if (timer) clearInterval(timer);
+            timer = setInterval(() => loadData(false), (S.iv || 20) * 1000);
+        }
     </script>
 </body>
 </html>
