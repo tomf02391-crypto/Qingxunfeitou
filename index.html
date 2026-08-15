@@ -1025,7 +1025,7 @@
         function fmt(n) { return Number(n).toLocaleString('zh-CN', { minimumFractionDigits: 1, maximumFractionDigits: 1 }); }
 
         // ============================================================
-        // 数据加载 — 仅真实数据，无模拟备用
+        // 数据加载 — 仅真实数据，通过多个CORS代理
         // ============================================================
         let HIST = [],
             AI = { sha: [], sz: [] };
@@ -1065,86 +1065,67 @@
             };
         }
 
-        // ---------- 多源获取（仅真实） ----------
+        // ---------- 通过CORS代理获取真实数据 ----------
         async function fetchRealData() {
             const key = API_KEY;
-            const sources = [];
-
-            // 1. 直连（可能因CORS失败）
-            sources.push({
-                id: 'direct',
-                name: '直连(yu28.top)',
-                base: 'https://yu28.top',
-                headers: { 'X-Api-Key': key },
-                paths: { kj: '/api/kj.json?nbr=100', sz: '/api/sz.json?nbr=50', sha: '/api/sha.json?nbr=50' }
-            });
-
-            // 2. 同源代理（需服务器支持）
-            if (location.protocol === 'https:' || location.protocol === 'http:') {
-                sources.push({
-                    id: 'proxy',
-                    name: '同源代理',
-                    base: location.origin,
-                    headers: {},
-                    paths: { kj: '/proxy/kj.json?nbr=100', sz: '/proxy/sz.json?nbr=50', sha: '/proxy/sha.json?nbr=50' }
-                });
-            }
-
-            // 3. 云端隧道（第三方代理）
-            sources.push({
-                id: 'rproxy',
-                name: '云端隧道',
-                base: 'https://2ff770c2bf653a.lhr.life',
-                headers: {},
-                paths: { kj: '/proxy/kj.json?nbr=100', sz: '/proxy/sz.json?nbr=50', sha: '/proxy/sha.json?nbr=50' }
-            });
-
-            // 4. CORS代理（allorigins）
-            const corsProxy = 'https://api.allorigins.win/raw?url=';
-            sources.push({
-                id: 'cors',
-                name: 'CORS代理(allorigins)',
-                base: corsProxy,
-                headers: {},
-                paths: {
-                    kj: encodeURIComponent('https://yu28.top/api/kj.json?nbr=100&api_key=' + key),
-                    sz: encodeURIComponent('https://yu28.top/api/sz.json?nbr=50&api_key=' + key),
-                    sha: encodeURIComponent('https://yu28.top/api/sha.json?nbr=50&api_key=' + key)
+            // 定义代理列表（按可用性排序）
+            const proxyList = [
+                {
+                    name: 'allorigins',
+                    url: (path) =>
+                        `https://api.allorigins.win/raw?url=${encodeURIComponent('https://yu28.top' + path + '&api_key=' + key)}`
                 },
-                isProxy: true
-            });
+                {
+                    name: 'corsproxy.io',
+                    url: (path) =>
+                        `https://corsproxy.io/?${encodeURIComponent('https://yu28.top' + path + '&api_key=' + key)}`
+                },
+                {
+                    name: 'proxy.cors.sh',
+                    url: (path) => `https://proxy.cors.sh/yu28.top${path}?api_key=${key}`,
+                    headers: { 'x-cors-api-key': 'temp_123' } // 可选，某些代理需要
+                }
+            ];
 
-            let lastError = null;
-            for (const src of sources) {
+            // 尝试每个代理
+            for (const proxy of proxyList) {
                 try {
-                    const fetchOpt = (path) => {
-                        const url = src.base + (src.isProxy ? '' : '') + path;
-                        return fetch(url, {
-                            headers: src.headers || {},
-                            signal: AbortSignal.timeout(8000),
-                            cache: 'no-store'
-                        });
+                    // 构建三个请求的URL
+                    const kjUrl = proxy.url('/api/kj.json?nbr=100');
+                    const szUrl = proxy.url('/api/sz.json?nbr=50');
+                    const shaUrl = proxy.url('/api/sha.json?nbr=50');
+
+                    const headers = proxy.headers || {};
+
+                    const fetchWithTimeout = (url, timeout = 10000) => {
+                        return Promise.race([
+                            fetch(url, { headers, signal: AbortSignal.timeout(timeout) }),
+                            new Promise((_, reject) => setTimeout(() => reject(new Error('超时')), timeout))
+                        ]);
                     };
+
                     const [kjRes, szRes, shaRes] = await Promise.all([
-                        fetchOpt(src.paths.kj).then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status))),
-                        fetchOpt(src.paths.sz).then(r => r.ok ? r.json() : { data: [] }).catch(() => ({ data: [] })),
-                        fetchOpt(src.paths.sha).then(r => r.ok ? r.json() : { data: [] }).catch(() => ({ data: [] }))
+                        fetchWithTimeout(kjUrl).then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status))),
+                        fetchWithTimeout(szUrl).then(r => r.ok ? r.json() : { data: [] }).catch(() => ({ data: [] })),
+                        fetchWithTimeout(shaUrl).then(r => r.ok ? r.json() : { data: [] }).catch(() => ({ data: [] }))
                     ]);
+
                     const kjData = kjRes.data || kjRes.list || kjRes.rows || (Array.isArray(kjRes) ? kjRes : []);
                     if (!kjData || !kjData.length) throw new Error('空数据');
+
                     return {
                         kj: kjData,
                         sz: szRes.data || szRes.list || [],
                         sha: shaRes.data || shaRes.list || [],
-                        source: src.name,
+                        source: proxy.name,
                         raw: kjRes
                     };
                 } catch (e) {
-                    lastError = e;
+                    console.warn(`代理 ${proxy.name} 失败:`, e.message);
                     continue;
                 }
             }
-            throw lastError || new Error('所有真实数据源均不可用');
+            throw new Error('所有代理均不可用');
         }
 
         // ---------- 主加载 ----------
@@ -1152,7 +1133,6 @@
             if (isFetching) return;
             isFetching = true;
             try {
-                // 仅真实数据，无模拟
                 const result = await fetchRealData();
 
                 const hist = result.kj.map(normKj).filter(h => !isNaN(h.sum) && h.nbr);
@@ -1194,18 +1174,15 @@
 
             } catch (e) {
                 console.error('真实数据加载失败:', e);
-                // 清除旧数据中的“模拟”标记，但保留已有真实数据（如果有）
                 document.getElementById('subLine').textContent = '⚠️ 真实数据加载失败：' + e.message;
                 document.getElementById('srcDot').className = 'src-dot offline';
-                document.getElementById('srcLabel').textContent = '❌ 真实数据加载失败，请检查网络或API Key';
+                document.getElementById('srcLabel').textContent = '❌ 所有代理均失败，请检查网络或API Key';
                 if (!HIST.length) {
-                    // 无任何数据，清空展示
                     document.getElementById('liveInfo').textContent = '数据不可用';
                     document.getElementById('sigQj').textContent = '--';
                     document.getElementById('sigXg').textContent = '--';
                     document.getElementById('planBox').innerHTML = '<div style="color:var(--dim);font-size:13px">无数据</div>';
                 } else {
-                    // 保留旧数据，但标记为过期
                     document.getElementById('subLine').textContent = '⚠️ 数据已过期（最新加载失败），请手动刷新';
                 }
             } finally {
