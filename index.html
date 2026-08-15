@@ -1073,9 +1073,9 @@
                     new Promise((_, reject) => setTimeout(() => reject(new Error('超时')), timeout))
                 ]);
             const trySource = async (name, mkUrl, headers = {}) => {
-                const kjUrl = mkUrl('/api/kj.json?nbr=100');
-                const szUrl = mkUrl('/api/sz.json?nbr=50');
-                const shaUrl = mkUrl('/api/sha.json?nbr=50');
+                const kjUrl = mkUrl('kj');
+                const szUrl = mkUrl('sz');
+                const shaUrl = mkUrl('sha');
                 if (!kjUrl || !szUrl || !shaUrl) throw new Error('当前环境不适用');
                 const [kjRes, szRes, shaRes] = await Promise.all([
                     fetchOne(kjUrl, headers).then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status))),
@@ -1086,15 +1086,17 @@
                 if (!kjData || !kjData.length) throw new Error('空数据');
                 return { kj: kjData, sz: szRes.data || szRes.list || [], sha: shaRes.data || shaRes.list || [], source: name, raw: kjRes };
             };
-            // 数据源列表：完全对齐星轨_优化版_v3 CONFIG.API_URLS（直连→allorigins→proxy.cors.sh）
+            // 数据源列表：GitHub 同源数据（仓库 data/*.json，无CORS）优先，其次 yu28 直连，代理兜底
+            const nbrOf = (k) => (k === 'kj' ? 100 : 50);
             const sources = [
-                ['yu28直连', (p) => 'https://yu28.top' + p, { 'X-Api-Key': key }],
-                ['allorigins', (p) => 'https://api.allorigins.win/raw?url=' + encodeURIComponent('https://yu28.top' + p), {}],
-                ['proxy.cors.sh', (p) => 'https://proxy.cors.sh/yu28.top' + p, { 'x-cors-api-key': 'temp_123' }],
+                ['GitHub同源', (k) => 'data/' + (k === 'kj' ? 'latest' : k) + '.json?t=' + Date.now(), {}],
+                ['yu28直连', (k) => 'https://yu28.top/api/' + k + '.json?nbr=' + nbrOf(k), { 'X-Api-Key': key }],
+                ['allorigins', (k) => 'https://api.allorigins.win/raw?url=' + encodeURIComponent('https://yu28.top/api/' + k + '.json?nbr=' + nbrOf(k)), {}],
+                ['proxy.cors.sh', (k) => 'https://proxy.cors.sh/yu28.top/api/' + k + '.json?nbr=' + nbrOf(k), { 'x-cors-api-key': 'temp_123' }],
             ];
-            // 1) 直连优先：成功即返回（星轨版实测唯一稳定源）
+            // 1) 同源数据优先：成功即返回（无CORS，GitHub Pages 下最稳）
             try { return await trySource(sources[0][0], sources[0][1], sources[0][2]); }
-            catch (e) { console.warn('yu28直连失败:', e.message); }
+            catch (e) { console.warn(sources[0][0] + '失败:', e.message); }
             // 2) 其余代理并发兜底，任一成功即用
             const results = await Promise.allSettled(sources.slice(1).map(([n, mk, h]) => trySource(n, mk, h)));
             const ok = results.find(r => r.status === 'fulfilled');
