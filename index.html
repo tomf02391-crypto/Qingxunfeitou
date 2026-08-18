@@ -1137,7 +1137,7 @@
                         combo: d.combination || d.combo || (BCLCCalc.comboOf(d.num || d.sum || 0)),
                         big: (d.num || d.sum || 0) >= 14,
                         odd: (d.num || d.sum || 0) % 2 === 1,
-                        raw_nums: d.raw_nums || [],
+                        raw_nums: d.nbrs || d.raw_nums || [],
                     }));
 
                     if (kjArr.length > 0) {
@@ -1171,7 +1171,7 @@
                             combo: d.combo || BCLCCalc.comboOf(d.sum),
                             big: d.big !== undefined ? d.big : d.sum >= 14,
                             odd: d.odd !== undefined ? d.odd : d.sum % 2 === 1,
-                            raw_nums: d.rawNums || [],
+                            raw_nums: d.nbrs || d.rawNums || [],
                         }));
                         return {
                             kj: kjArr, sz: [], sha: [],
