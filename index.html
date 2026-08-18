@@ -664,11 +664,11 @@
         反水规则：1万流水反30（abc玩法不计入流水）· 请理性投注、量力而行。
     </div>
 
-    <script src="pc28_standard_api.js"></script>
+    <script src="bclc_calc.js"></script>
     <script>
         // ============================================================
         // 双引擎算法库（千金U v4 + 星轨 v3）
-        // 数据源已统一为 pc28.standard_api 模块（多源自动降级）
+        // 数据源: Liquid-Glass-Profil 数据仓库（BCLC官方规则）
         // ============================================================
         const ALL = ['大单', '大双', '小单', '小双'];
         const COMBO_MAP = { '小单': ['大单', '小双'], '小双': ['大双', '小单'], '大单': ['大双', '小单'], '大双': ['小双', '大单'] };
@@ -1085,7 +1085,12 @@
         function normKj(h) {
             let sum = NaN,
                 number = h.number;
-            if (h.num !== undefined && h.num !== null) {
+            // BCLC官方规则格式: h.b1, h.b2, h.b3, h.sum
+            if (h.sum !== undefined && h.sum !== null) {
+                sum = Number(h.sum);
+                if (!number) number = `${h.b1 || ''}+${h.b2 || ''}+${h.b3 || ''}`;
+                if (!number || number === '+') number = sum + '点';
+            } else if (h.num !== undefined && h.num !== null) {
                 sum = Number(h.num);
                 if (!number) number = sum + '点';
             } else if (h.number !== undefined) {
@@ -1094,7 +1099,7 @@
                 else sum = Number(h.number.replace(/[^0-9]/g, ''));
             }
             if (isNaN(sum)) sum = 14;
-            const combo = h.combination || comboOf(sum);
+            const combo = h.combination || h.combo || comboOf(sum);
             return {
                 nbr: String(h.nbr || h.issue || h.period || h.qs || ''),
                 time: h.time || h.timestamp || h.datetime,
@@ -1104,47 +1109,81 @@
             };
         }
 
-        // ---------- 通过统一PC28标准API获取真实数据（多源自动降级） ----------
+        // ---------- 从 Liquid-Glass-Profil 数据仓库获取BCLC官方规则数据 ----------
         async function fetchRealData() {
-            // 优先使用统一API模块（pc28.standard_api.js）
-            if (window.pc28) {
+            // ① 优先从 Liquid-Glass-Profil 数据仓库读取（已按BCLC官方规则计算好）
+            const DATA_URLS = [
+                'https://tomf02391-crypto.github.io/Liquid-Glass-Profil/data/latest.json',
+                'data/latest.json',
+            ];
+
+            for (const url of DATA_URLS) {
                 try {
-                    const [latest, sz, sha] = await Promise.allSettled([
-                        pc28.getLatest(),
-                        pc28.getDoubleGroup(),
-                        pc28.getKillGroup()
-                    ]);
-                    const kjData = latest.status === 'fulfilled' ? [latest.value] : [];
-                    // 获取历史数据补充
-                    let histData = [];
-                    try { histData = await pc28.getHistory(100); } catch(e) {}
-                    const allKj = [...kjData, ...histData];
-                    if (allKj.length === 0) throw new Error('统一API返回空');
-                    const szData = sz.status === 'fulfilled' ? (sz.value.data || sz.value.list || []) : [];
-                    const shaData = sha.status === 'fulfilled' ? (sha.value.data || sha.value.list || []) : [];
-                    return {
-                        kj: allKj,
-                        sz: szData,
-                        sha: shaData,
-                        source: 'pc28.standard_api（多源降级）',
-                        raw: allKj[0] || {}
-                    };
+                    const resp = await fetch(url + '?t=' + Date.now(), { cache: 'no-store' });
+                    if (!resp.ok) continue;
+                    const json = await resp.json();
+                    if (!json.data || json.data.length === 0) continue;
+
+                    const kjArr = json.data.map(d => ({
+                        nbr: String(d.nbr || ''),
+                        date: d.date || '',
+                        time: d.time || '',
+                        b1: d.b1 || 0,
+                        b2: d.b2 || 0,
+                        b3: d.b3 || 0,
+                        sum: d.num || d.sum || (d.b1 + d.b2 + d.b3),
+                        number: d.number || `${d.b1}+${d.b2}+${d.b3}`,
+                        combo: d.combination || d.combo || (BCLCCalc.comboOf(d.num || d.sum || 0)),
+                        big: (d.num || d.sum || 0) >= 14,
+                        odd: (d.num || d.sum || 0) % 2 === 1,
+                        raw_nums: d.raw_nums || [],
+                    }));
+
+                    if (kjArr.length > 0) {
+                        const srcName = url.includes('github.io') ? 'Liquid-Glass-Profil数据仓库(BCLC官方规则)' : '本地latest.json';
+                        return {
+                            kj: kjArr,
+                            sz: [],
+                            sha: [],
+                            source: srcName,
+                            raw: json,
+                            countdown: json.countdown || null,
+                        };
+                    }
                 } catch (e) {
-                    console.warn('[统一API] 失败，降级到备用源:', e.message);
+                    console.warn(`[数据源] ${url} 失败:`, e.message);
                 }
             }
-            // 降级：GitHub 同源数据兜底
-            try {
-                const [kj, sz, sha] = await Promise.all([
-                    fetch('data/latest.json?t=' + Date.now()).then(r => r.ok ? r.json() : null),
-                    fetch('data/sz.json?t=' + Date.now()).then(r => r.ok ? r.json() : { data: [] }),
-                    fetch('data/sha.json?t=' + Date.now()).then(r => r.ok ? r.json() : { data: [] })
-                ]);
-                const kjArr = kj ? [kj] : [];
-                return { kj: kjArr, sz: sz.data || [], sha: sha.data || [], source: 'GitHub同源兜底', raw: kj || {} };
-            } catch (e2) {
-                throw new Error('所有数据源均不可用: ' + e2.message);
+
+            // ② 降级：BCLCCalc 直连 Keno 接口现场计算
+            if (window.BCLCCalc) {
+                try {
+                    const result = await BCLCCalc.fetchFromAllSources();
+                    if (result.data && result.data.length > 0) {
+                        const kjArr = result.data.map(d => ({
+                            nbr: String(d.nbr || ''),
+                            date: d.date || '',
+                            time: d.time || '',
+                            b1: d.b1, b2: d.b2, b3: d.b3,
+                            sum: d.sum,
+                            number: `${d.b1}+${d.b2}+${d.b3}`,
+                            combo: d.combo || BCLCCalc.comboOf(d.sum),
+                            big: d.big !== undefined ? d.big : d.sum >= 14,
+                            odd: d.odd !== undefined ? d.odd : d.sum % 2 === 1,
+                            raw_nums: d.rawNums || [],
+                        }));
+                        return {
+                            kj: kjArr, sz: [], sha: [],
+                            source: result.source,
+                            raw: { countdown: null },
+                        };
+                    }
+                } catch (e) {
+                    console.warn('[BCLCCalc] 直连失败:', e.message);
+                }
             }
+
+            throw new Error('所有BCLC数据源均不可用');
         }
 
         // ---------- 主加载 ----------
