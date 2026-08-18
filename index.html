@@ -664,9 +664,11 @@
         反水规则：1万流水反30（abc玩法不计入流水）· 请理性投注、量力而行。
     </div>
 
+    <script src="pc28_standard_api.js"></script>
     <script>
         // ============================================================
         // 双引擎算法库（千金U v4 + 星轨 v3）
+        // 数据源已统一为 pc28.standard_api 模块（多源自动降级）
         // ============================================================
         const ALL = ['大单', '大双', '小单', '小双'];
         const COMBO_MAP = { '小单': ['大单', '小双'], '小双': ['大双', '小单'], '大单': ['大双', '小单'], '大双': ['小双', '大单'] };
@@ -1102,46 +1104,47 @@
             };
         }
 
-        // ---------- 通过CORS代理获取真实数据（数据功能移植自：星轨_优化版_v3） ----------
+        // ---------- 通过统一PC28标准API获取真实数据（多源自动降级） ----------
         async function fetchRealData() {
-            const key = API_KEY;
-            // 移植自星轨优化版实测策略：yu28 直连（带 X-Api-Key，响应 vary: Origin 动态CORS）
-            // 在 GitHub Pages https 环境下可直接 fetch 成功；公共 CORS 代理仅作兜底。
-            const fetchOne = (url, headers, timeout = 6000) =>
-                Promise.race([
-                    fetch(url, { headers, signal: AbortSignal.timeout(timeout) }),
-                    new Promise((_, reject) => setTimeout(() => reject(new Error('超时')), timeout))
+            // 优先使用统一API模块（pc28.standard_api.js）
+            if (window.pc28) {
+                try {
+                    const [latest, sz, sha] = await Promise.allSettled([
+                        pc28.getLatest(),
+                        pc28.getDoubleGroup(),
+                        pc28.getKillGroup()
+                    ]);
+                    const kjData = latest.status === 'fulfilled' ? [latest.value] : [];
+                    // 获取历史数据补充
+                    let histData = [];
+                    try { histData = await pc28.getHistory(100); } catch(e) {}
+                    const allKj = [...kjData, ...histData];
+                    if (allKj.length === 0) throw new Error('统一API返回空');
+                    const szData = sz.status === 'fulfilled' ? (sz.value.data || sz.value.list || []) : [];
+                    const shaData = sha.status === 'fulfilled' ? (sha.value.data || sha.value.list || []) : [];
+                    return {
+                        kj: allKj,
+                        sz: szData,
+                        sha: shaData,
+                        source: 'pc28.standard_api（多源降级）',
+                        raw: allKj[0] || {}
+                    };
+                } catch (e) {
+                    console.warn('[统一API] 失败，降级到备用源:', e.message);
+                }
+            }
+            // 降级：GitHub 同源数据兜底
+            try {
+                const [kj, sz, sha] = await Promise.all([
+                    fetch('data/latest.json?t=' + Date.now()).then(r => r.ok ? r.json() : null),
+                    fetch('data/sz.json?t=' + Date.now()).then(r => r.ok ? r.json() : { data: [] }),
+                    fetch('data/sha.json?t=' + Date.now()).then(r => r.ok ? r.json() : { data: [] })
                 ]);
-            const trySource = async (name, mkUrl, headers = {}) => {
-                const kjUrl = mkUrl('kj');
-                const szUrl = mkUrl('sz');
-                const shaUrl = mkUrl('sha');
-                if (!kjUrl || !szUrl || !shaUrl) throw new Error('当前环境不适用');
-                const [kjRes, szRes, shaRes] = await Promise.all([
-                    fetchOne(kjUrl, headers).then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status))),
-                    fetchOne(szUrl, headers).then(r => r.ok ? r.json() : { data: [] }).catch(() => ({ data: [] })),
-                    fetchOne(shaUrl, headers).then(r => r.ok ? r.json() : { data: [] }).catch(() => ({ data: [] }))
-                ]);
-                const kjData = kjRes.data || kjRes.list || kjRes.rows || (Array.isArray(kjRes) ? kjRes : []);
-                if (!kjData || !kjData.length) throw new Error('空数据');
-                return { kj: kjData, sz: szRes.data || szRes.list || [], sha: shaRes.data || shaRes.list || [], source: name, raw: kjRes };
-            };
-            // 数据源列表：GitHub 同源数据（仓库 data/*.json，无CORS）优先，其次 yu28 直连，代理兜底
-            const nbrOf = (k) => (k === 'kj' ? 100 : 50);
-            const sources = [
-                ['GitHub同源', (k) => 'data/' + (k === 'kj' ? 'latest' : k) + '.json?t=' + Date.now(), {}],
-                ['yu28直连', (k) => 'https://yu28.top/api/' + k + '.json?nbr=' + nbrOf(k), { 'X-Api-Key': key }],
-                ['allorigins', (k) => 'https://api.allorigins.win/raw?url=' + encodeURIComponent('https://yu28.top/api/' + k + '.json?nbr=' + nbrOf(k)), {}],
-                ['proxy.cors.sh', (k) => 'https://proxy.cors.sh/yu28.top/api/' + k + '.json?nbr=' + nbrOf(k), { 'x-cors-api-key': 'temp_123' }],
-            ];
-            // 1) 同源数据优先：成功即返回（无CORS，GitHub Pages 下最稳）
-            try { return await trySource(sources[0][0], sources[0][1], sources[0][2]); }
-            catch (e) { console.warn(sources[0][0] + '失败:', e.message); }
-            // 2) 其余代理并发兜底，任一成功即用
-            const results = await Promise.allSettled(sources.slice(1).map(([n, mk, h]) => trySource(n, mk, h)));
-            const ok = results.find(r => r.status === 'fulfilled');
-            if (ok) return ok.value;
-            throw new Error('所有数据源均不可用: ' + results.map(r => r.reason ? r.reason.message : '').join(' | '));
+                const kjArr = kj ? [kj] : [];
+                return { kj: kjArr, sz: sz.data || [], sha: sha.data || [], source: 'GitHub同源兜底', raw: kj || {} };
+            } catch (e2) {
+                throw new Error('所有数据源均不可用: ' + e2.message);
+            }
         }
 
         // ---------- 主加载 ----------
